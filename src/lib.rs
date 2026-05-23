@@ -3,6 +3,7 @@ pub mod linguistic;
 pub mod ai;
 pub mod actor;
 pub mod config;
+pub mod core;
 pub mod dream;
 pub mod mapper;
 pub mod models;
@@ -20,6 +21,7 @@ pub mod cli;
 
 pub use actor::PDCActor;
 pub use config::{OntologyLoader, PhysisConfig};
+pub use core::PhysisCore;
 pub use dream::DreamEngine;
 pub use mapper::OntologyMapper;
 pub use models::*;
