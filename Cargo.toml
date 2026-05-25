@@ -22,6 +22,9 @@ reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], op
 axum = { version = "0.7", optional = true }
 tower-http = { version = "0.5", features = ["fs"], optional = true }
 dotenvy = "0.15"
+ort = { version = "2.0.0-rc.12", optional = true }
+ndarray = { version = "0.16", optional = true }
+tokenizers = { version = "0.21", optional = true }
 urlencoding = "2.1"
 sled = "0.34"
 async-trait = "0.1"
@@ -42,7 +45,8 @@ network = ["dep:notify", "dep:tokio"]
 voice = ["dep:tokio", "dep:reqwest"]
 web = ["dep:axum", "dep:tower-http", "dep:tokio"]
 tui = ["dep:tokio", "dep:ratatui", "dep:crossterm"]
-full = ["cli", "network", "voice", "web", "tui"]
+embed-onnx = ["dep:ort", "dep:ndarray", "dep:tokenizers"]
+full = ["cli", "network", "voice", "web", "tui", "embed-onnx"]
 
 [[bin]]
 name = "physis-voice"
@@ -53,3 +57,8 @@ path = "src/bin/voice.rs"
 name = "physis-tui"
 required-features = ["voice", "tui"]
 path = "src/bin/tui.rs"
+
+[[bin]]
+name = "physis-web"
+required-features = ["web"]
+path = "src/bin/web_server.rs"

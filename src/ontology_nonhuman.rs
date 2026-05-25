@@ -28,30 +28,24 @@ pub fn resolve_nonhuman_domain<'a>(
     None
 }
 
-pub fn enrich_nonhuman_goal<'a>(
+pub fn enrich_nonhuman_goal(
     goal: &Goal,
     domains: &std::collections::HashMap<String, DomainDef>,
 ) -> String {
-    let def = resolve_nonhuman_domain(&goal.domain_name, domains);
+    let def = resolve_nonhuman_domain(&goal.id, domains);
     match def {
         Some(d) => {
-            let axis = d
-                .axis_machine
-                .map(|a| a.as_str().to_string())
-                .unwrap_or_default();
             format!(
-                "• \"{}\" [{}/{} → {} +{}] progress={}%  [MACHINE]",
-                goal.name,
-                d.domain.as_str(),
-                d.mode.as_str(),
-                axis,
+                "• \"{}\" [{} +{}] progress={}%  [MACHINE]",
+                goal.id,
+                d.name,
                 d.unit,
                 (goal.progress * 100.0) as u32
             )
         }
         None => format!(
             "• \"{}\" [UNKNOWN_MACHINE_DOMAIN] progress={}%",
-            goal.name,
+            goal.id,
             (goal.progress * 100.0) as u32
         ),
     }

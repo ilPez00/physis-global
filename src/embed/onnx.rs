@@ -1,0 +1,170 @@
+use super::VectorEmbed;
+use std::path::Path;
+use std::sync::Mutex;
+
+use ort::value::{DynTensorValueType, Tensor};
+
+pub struct OnnxEmbedder {
+    dim: usize,
+    session: Mutex<Option<ort::session::Session>>,
+    tokenizer: Option<tokenizers::Tokenizer>,
+    pub model_path: String,
+    max_length: usize,
+}
+
+impl OnnxEmbedder {
+    pub fn new(model_dir: &str) -> Self {
+        let dim = 384;
+        let model_path = Path::new(model_dir).join("model.onnx");
+        let tok_path = Path::new(model_dir).join("tokenizer.json");
+
+        let session = if model_path.exists() {
+            ort::session::Session::builder()
+                .ok()
+                .and_then(|mut b| b.commit_from_file(&model_path).ok())
+        } else {
+            None
+        };
+
+        let tokenizer = if tok_path.exists() {
+            tokenizers::Tokenizer::from_file(&tok_path).ok()
+        } else {
+            None
+        };
+
+        Self {
+            dim,
+            session: Mutex::new(session),
+            tokenizer,
+            model_path: model_dir.to_string(),
+            max_length: 128,
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.session.lock().unwrap().is_some() && self.tokenizer.is_some()
+    }
+}
+
+impl VectorEmbed for OnnxEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        let tokenizer = match &self.tokenizer {
+            Some(t) => t,
+            None => return fallback_embed(text, self.dim),
+        };
+
+        let mut session_guard = self.session.lock().unwrap();
+        let session = match session_guard.as_mut() {
+            Some(s) => s,
+            None => return fallback_embed(text, self.dim),
+        };
+
+        let encoding = match tokenizer.encode(text, true) {
+            Ok(e) => e,
+            Err(_) => return fallback_embed(text, self.dim),
+        };
+
+        let actual_len = encoding.len().min(self.max_length);
+        let ids: Vec<i64> = encoding
+            .get_ids()
+            .iter()
+            .take(self.max_length)
+            .map(|&v| v as i64)
+            .collect();
+        let type_ids: Vec<i64> = encoding
+            .get_type_ids()
+            .iter()
+            .take(self.max_length)
+            .map(|&v| v as i64)
+            .collect();
+        let mask: Vec<i64> = (0..self.max_length)
+            .map(|i| if i < actual_len { 1i64 } else { 0i64 })
+            .collect();
+
+        let input_ids = Tensor::<i64>::from_array((&[1, self.max_length][..], ids)).ok();
+        let attn_mask = Tensor::<i64>::from_array((&[1, self.max_length][..], mask)).ok();
+        let tok_types = Tensor::<i64>::from_array((&[1, self.max_length][..], type_ids)).ok();
+
+        let (ids_t, mask_t, types_t) = match (input_ids, attn_mask, tok_types) {
+            (Some(a), Some(b), Some(c)) => (a, b, c),
+            _ => return fallback_embed(text, self.dim),
+        };
+
+        let inputs: Vec<(&str, ort::value::Value<ort::value::DynValueTypeMarker>)> = vec![
+            ("input_ids", ids_t.into()),
+            ("attention_mask", mask_t.into()),
+            ("token_type_ids", types_t.into()),
+        ];
+
+        let mut s = session;
+        let outputs = match s.run(inputs) {
+            Ok(o) => o,
+            Err(_) => return fallback_embed(text, self.dim),
+        };
+
+        let hidden = match outputs.get("last_hidden_state").or_else(|| {
+            outputs.get("sentence_embedding")
+        }).or_else(|| {
+            (outputs.len() > 0).then(|| &outputs[0])
+        }) {
+            Some(v) => v,
+            None => return fallback_embed(text, self.dim),
+        };
+
+        // Downcast DynValue -> DynTensor -> extract array
+        let tensor_ref = match hidden.downcast_ref::<DynTensorValueType>() {
+            Ok(t) => t,
+            Err(_) => return fallback_embed(text, self.dim),
+        };
+
+        let view = match tensor_ref.try_extract_array::<f32>() {
+            Ok(v) => v,
+            Err(_) => return fallback_embed(text, self.dim),
+        };
+
+        let shape = view.shape();
+        let tokens = if shape.len() >= 2 { shape[1] } else { return fallback_embed(text, self.dim); };
+        let features = if shape.len() >= 3 { shape[2] } else { self.dim };
+        let stride_t = if shape.len() >= 3 { shape[2] } else { 1 };
+        let stride_b = tokens * stride_t;
+        let limit = tokens.min(actual_len);
+
+        let mut pooled = vec![0.0f32; self.dim];
+        let mut count = 0usize;
+        for t in 0..limit {
+            count += 1;
+            for d in 0..features.min(self.dim) {
+                pooled[d] += view[stride_b * 0 + t * stride_t + d];
+            }
+        }
+
+        if count > 0 {
+            for v in &mut pooled {
+                *v /= count as f32;
+            }
+        }
+
+        let norm = pooled.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+        pooled.iter_mut().for_each(|x| *x /= norm);
+        pooled
+    }
+
+    fn dimension(&self) -> usize {
+        self.dim
+    }
+}
+
+fn fallback_embed(text: &str, dim: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; dim];
+    let h: u64 = text
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(h);
+    use rand::Rng;
+    for x in &mut v {
+        *x = rng.gen_range(-1.0..1.0);
+    }
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+    v.iter_mut().for_each(|x| *x /= norm);
+    v
+}

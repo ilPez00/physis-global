@@ -79,10 +79,9 @@ pub struct PhysisApp {
 impl PhysisApp {
     pub fn new(config: PhysisConfig) -> Self {
         let ontology = OntologyLoader::load_all(&config);
-        let trie = DynamicVectorTrie::new();
         let mapper = OntologyMapper::new(ontology.clone());
         let actor = PDCActor::new(config.pdca_stagnant_threshold, config.pdca_stagnant_window);
-        let dreams = DreamEngine::new(trie);
+        let dreams = DreamEngine::new();
 
         Self {
             config,
@@ -97,7 +96,7 @@ impl PhysisApp {
     pub fn run_scan(&mut self, dir: &std::path::Path, format: &str) -> String {
         let goals = self.mapper.map_filesystem(dir, None);
         self.goals = goals;
-        self.dreams.trie = self.mapper.trie.clone();
+        // trie lives in mapper; dreams uses vector operations directly
 
         match format {
             "json" => output::format_json_graph(&self.mapper.trie),
@@ -221,11 +220,8 @@ No other text."#.into(),
         let actor_stats = self.actor.stats(&self.goals);
         out.push_str(&format!("  total_actions: {}\n", actor_stats.total_actions));
         out.push_str(&format!("  avg_grade: {:.3}\n", actor_stats.avg_grade));
-        if !actor_stats.stagnant_goals.is_empty() {
-            out.push_str("  stagnant_goals:\n");
-            for g in &actor_stats.stagnant_goals {
-                out.push_str(&format!("    - {g}\n"));
-            }
+        if actor_stats.stagnant_count > 0 {
+            out.push_str(&format!("  stagnant_goals: {}\n", actor_stats.stagnant_count));
         }
         out
     }

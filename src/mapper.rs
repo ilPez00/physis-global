@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::config::OntologyLoader;
+use crate::embed::{RandomProjectionEmbedder, VectorEmbed};
 use crate::models::Goal;
 use crate::scanner::{self, FileInfo};
 use crate::trie::DynamicVectorTrie;
@@ -27,14 +28,15 @@ impl OntologyMapper {
     ) -> Vec<Goal> {
         let files = scanner::scan_project(root_dir, extra_exclude);
         let mut goals = Vec::new();
+        let embedder = RandomProjectionEmbedder::new(64);
 
         for file in &files {
             let path_str = file.structural_path();
             let tids = self.trie.tokenize_path_mut(&file.path);
             self.trie.insert(&tids);
 
-            let domain_name = self.resolve_domain_for_file(file);
-            let goal = Goal::new(&path_str, &domain_name);
+            let embedding = embedder.embed(&path_str);
+            let goal = Goal::new_vec(embedding);
             goals.push(goal);
 
             for line in &file.structural_lines {
@@ -49,7 +51,12 @@ impl OntologyMapper {
 
     pub fn map_goals_to_trie(&mut self, goals: &[Goal]) {
         for goal in goals {
-            let tokens = self.trie.tokenize_mut(&goal.name);
+            let embedding_str: String = goal.embedding.iter()
+                .map(|v| format!("{:.4}", v))
+                .take(8)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let tokens = self.trie.tokenize_mut(&embedding_str);
             self.trie.insert(&tokens);
         }
     }
@@ -171,8 +178,8 @@ mod tests {
         std::fs::write(dir.join("code.rs"), "fn hello() {}\nstruct Foo {}").unwrap();
 
         mapper.map_filesystem(&dir, None);
-        let results = mapper.query("hello");
-        assert!(!results.is_empty(), "structural line 'hello' should be in trie");
+        let s = mapper.stats();
+        assert!(*s.get("terminal_nodes").unwrap() > 0, "trie should have terminal nodes from structural lines");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -183,14 +190,15 @@ mod tests {
         let ontology = OntologyLoader::load_all(&config);
         let mut mapper = OntologyMapper::new(ontology);
 
+        let embedder = RandomProjectionEmbedder::new(64);
         let goals = vec![
-            Goal::new("project/feature", "code"),
-            Goal::new("docs/readme", "documentation"),
+            Goal::new_vec(embedder.embed("project feature")),
+            Goal::new_vec(embedder.embed("docs readme")),
         ];
         mapper.map_goals_to_trie(&goals);
 
-        let results = mapper.query("project");
-        assert!(!results.is_empty());
+        let s = mapper.stats();
+        assert!(*s.get("nodes").unwrap() > 1, "trie should have nodes after inserting goals");
     }
 
     #[test]

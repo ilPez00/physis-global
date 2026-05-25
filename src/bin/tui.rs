@@ -1,6 +1,7 @@
 use physis::ai::provider::ProviderCascade;
 use physis::ai::agent::{run_agent, AgentConfig};
 use physis::ai::tools::ToolRegistry;
+use physis::embed::{RandomProjectionEmbedder, VectorEmbed};
 use physis::{OntologyLoader, PhysisConfig, OntologicalMap, Goal};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -55,7 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let config = PhysisConfig::default();
             let ontology = OntologyLoader::load_all(&config);
             let mapper = physis::OntologyMapper::new(ontology);
-            let mut dream_engine = physis::DreamEngine::new(mapper.trie.clone());
+            let embedder = RandomProjectionEmbedder::new(64);
+            let mut dream_engine = physis::DreamEngine::new();
 
             loop {
                 {
@@ -98,11 +100,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     // Dreaming
-                    let goals = vec![Goal::new(&transcript, "voice")];
+                    let embedding = embedder.embed(&transcript);
+                    let goals = vec![Goal::new_vec(embedding)];
                     let dreams = dream_engine.generate_dreams(&goals, 1);
                     let mut state = app_state_clone.lock().unwrap();
                     for d in dreams {
-                        state.dreams.push(format!("{}: {}", d.dream_type.as_str(), d.description));
+                        state.dreams.push(format!("{}: sim={:.3}", d.id, physis::models::cosine_sim(&d.source, &d.embedding)));
                     }
                 }
             }

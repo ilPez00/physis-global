@@ -31,12 +31,11 @@ fn main() -> anyhow::Result<()> {
         Commands::Dream { count } => {
             let dreams = app.run_dream(count);
             for dream in &dreams {
-                println!("[{}] {} — {}",
-                    dream.dream_type.as_str(),
+                println!("[{}] source={:?} embedding={:?} grade={:?}",
                     dream.id,
-                    dream.description);
-                println!("  variation: {}", dream.variation.join(" → "));
-                println!();
+                    &dream.source[..dream.source.len().min(4)],
+                    &dream.embedding[..dream.embedding.len().min(4)],
+                    dream.grade);
             }
         }
         Commands::Evaluate { id, grade } => {

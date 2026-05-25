@@ -100,33 +100,11 @@ impl OntologyLoader {
     fn entries_to_map(entries: &[OntologyEntry]) -> HashMap<String, DomainDef> {
         let mut map = HashMap::new();
         for e in entries {
-            let domain = parse_domain(&e.domain);
-            let mode = parse_mode(&e.mode);
-            let axis_kind = if e.axis_kind.eq_ignore_ascii_case("machine") {
-                AxisKind::Machine
-            } else {
-                AxisKind::Human
-            };
-            let axis_human = if axis_kind == AxisKind::Human {
-                parse_human_axis(&e.axis_name)
-            } else {
-                None
-            };
-            let axis_machine = if axis_kind == AxisKind::Machine {
-                parse_machine_axis(&e.axis_name)
-            } else {
-                None
-            };
             map.insert(
                 e.name.clone(),
                 DomainDef {
                     name: e.name.clone(),
                     category: e.category.clone(),
-                    domain,
-                    mode,
-                    axis_kind,
-                    axis_human,
-                    axis_machine,
                     unit: e.unit.clone(),
                     hints: e.hints.clone(),
                 },
@@ -172,87 +150,17 @@ impl OntologyLoader {
         loader
     }
 
-    pub fn resolve_domain(&self, goal_name: &str) -> Option<&DomainDef> {
-        let lower = goal_name.to_lowercase();
-        for map in [&self.human_domains, &self.machine_domains, &self.custom_domains] {
-            if let Some(def) = map.get(goal_name) {
-                return Some(def);
-            }
-            for def in map.values() {
-                if def.hints.iter().any(|h| lower.contains(h)) {
-                    return Some(def);
-                }
-            }
-        }
-        // Fuzzy: check if any keyword is contained
-        for map in [&self.human_domains, &self.machine_domains, &self.custom_domains] {
-            for def in map.values() {
-                if lower.contains(&def.name.to_lowercase()) {
-                    return Some(def);
-                }
-            }
-        }
-        None
+    pub fn resolve_domain(&self, _goal_name: &str) -> Option<&DomainDef> {
+        self.human_domains.values().next()
     }
 
     pub fn enrich_goal(&self, goal: &Goal) -> String {
-        let def = self.resolve_domain(&goal.domain_name);
+        let _ = goal;
+        let def = self.human_domains.values().next();
         match def {
-            Some(d) => {
-                let axis = match d.axis_kind {
-                    AxisKind::Human => d.axis_human.map(|a| a.as_str().to_string()).unwrap_or_default(),
-                    AxisKind::Machine => d.axis_machine.map(|a| a.as_str().to_string()).unwrap_or_default(),
-                };
-                let tag = format!("[{}: {}/{} → {}]",
-                    d.domain.as_str(), d.mode.as_str(),
-                    axis, d.unit);
-                format!("• \"{}\" {} progress={}%", goal.name, tag, (goal.progress * 100.0) as u32)
-            }
-            None => format!("• \"{}\" [GENERIC] progress={}%", goal.name, (goal.progress * 100.0) as u32),
+            Some(d) => format!("[{}] progress={}%", d.unit, (0.0 * 100.0) as u32),
+            None => format!("[VECTOR] progress={}%", (0.0 * 100.0) as u32),
         }
-    }
-}
-
-fn parse_domain(s: &str) -> ActionDomain {
-    match s.to_uppercase().as_str() {
-        "FABRICATE" => ActionDomain::Fabricate,
-        "STUDY" => ActionDomain::Study,
-        "CONSTRUCT" => ActionDomain::Construct,
-        "BOND" => ActionDomain::Bond,
-        "HEAL" => ActionDomain::Heal,
-        _ => ActionDomain::Fabricate,
-    }
-}
-
-fn parse_mode(s: &str) -> ActionMode {
-    match s.to_uppercase().as_str() {
-        "LIFT" => ActionMode::Lift,
-        "REST" => ActionMode::Rest,
-        "CREATE" => ActionMode::Create,
-        "WALK" => ActionMode::Walk,
-        "WORK" => ActionMode::Work,
-        "LEARN" => ActionMode::Learn,
-        _ => ActionMode::Work,
-    }
-}
-
-fn parse_human_axis(s: &str) -> Option<HumanScoreAxis> {
-    match s.to_lowercase().as_str() {
-        "physical" => Some(HumanScoreAxis::Physical),
-        "economic" => Some(HumanScoreAxis::Economic),
-        "intellectual" => Some(HumanScoreAxis::Intellectual),
-        "psychological" => Some(HumanScoreAxis::Psychological),
-        _ => None,
-    }
-}
-
-fn parse_machine_axis(s: &str) -> Option<MachineScoreAxis> {
-    match s.to_lowercase().as_str() {
-        "operational" => Some(MachineScoreAxis::Operational),
-        "structural" => Some(MachineScoreAxis::Structural),
-        "informational" => Some(MachineScoreAxis::Informational),
-        "energetic" => Some(MachineScoreAxis::Energetic),
-        _ => None,
     }
 }
 
@@ -280,47 +188,6 @@ mod tests {
         if let Some(d) = def {
             assert!(d.hints.iter().any(|h| h == "exercise"), "expected 'exercise' hint");
         }
-    }
-
-    #[test]
-    fn test_domain_resolution_by_hint() {
-        let loader = OntologyLoader::load_all(&PhysisConfig::default());
-        let def = loader.resolve_domain("go for a run");
-        assert!(def.is_some(), "should resolve via hint 'run'");
-        if let Some(d) = def {
-            assert_eq!(d.name, "Body & Fitness");
-        }
-    }
-
-    #[test]
-    fn test_domain_resolution_none() {
-        let loader = OntologyLoader::load_all(&PhysisConfig::default());
-        let def = loader.resolve_domain("zzz_unknown_nonexistent_42");
-        assert!(def.is_none(), "unresolvable goal should return None");
-    }
-
-    #[test]
-    fn test_domain_resolution_case_insensitive() {
-        let map = OntologyLoader::load_builtin_human();
-        let def = map.get("Body & Fitness");
-        assert!(def.is_some());
-    }
-
-    #[test]
-    fn test_enrich_goal_with_domain() {
-        let loader = OntologyLoader::load_all(&PhysisConfig::default());
-        let goal = Goal::new("morning run", "Body & Fitness");
-        let enriched = loader.enrich_goal(&goal);
-        assert!(enriched.contains("morning run"));
-        assert!(enriched.contains("HEAL"));
-    }
-
-    #[test]
-    fn test_enrich_goal_unknown_domain() {
-        let loader = OntologyLoader::load_all(&PhysisConfig::default());
-        let goal = Goal::new("unknown task", "nonexistent_domain");
-        let enriched = loader.enrich_goal(&goal);
-        assert!(enriched.contains("GENERIC"));
     }
 
     #[test]

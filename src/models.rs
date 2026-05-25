@@ -1,352 +1,143 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use uuid::Uuid;
 
 pub type Score = f32;
 
-// ── Coherence Ontology ──────────────────────────────────────────────
-/// Rating system for logical patterns in the local vector database.
-/// Isomorphic: applies identically to machine functions and human behaviours.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub enum CoherenceRating {
-    /// Code compiled and executed with confirmed functional success.
-    /// Human: task completed and produced the expected real-world effect.
-    Success,
-    /// Code compiles but does not produce the expected effect (Inoperoso).
-    /// Human: task executed but no cognitive/material advancement detected.
-    Inert,
-    /// Compiler error or explicitly refuted logical pattern.
-    /// Human: violated a self-imposed order (diet break, skipped training).
-    Failure,
-}
-
-impl CoherenceRating {
-    /// Numeric weight for scoring calculations.
-    pub fn weight(self) -> Score {
-        match self {
-            Self::Success => 1.0,
-            Self::Inert => 0.0,
-            Self::Failure => -1.0,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Success => "success",
-            Self::Inert => "inert",
-            Self::Failure => "failure",
-        }
-    }
-
-    pub fn from_weight(w: Score) -> Self {
-        if w >= 0.85 {
-            Self::Success
-        } else if w >= -0.15 {
-            Self::Inert
-        } else {
-            Self::Failure
-        }
-    }
-}
-
-impl fmt::Display for CoherenceRating {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
+/// State of a goal in vector space. No human-readable qualia.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoherenceNode {
-    pub id: String,
-    pub label: String,
-    pub rating: CoherenceRating,
-    pub axis_kind: AxisKind,
-    pub domain: Option<String>,
-    pub evidence: Vec<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub transition_count: u32,
-}
-
-impl CoherenceNode {
-    pub fn new(label: &str, rating: CoherenceRating, axis_kind: AxisKind) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4().to_string(),
-            label: label.to_string(),
-            rating,
-            axis_kind,
-            domain: None,
-            evidence: vec![],
-            created_at: now,
-            updated_at: now,
-            transition_count: 0,
-        }
-    }
-
-    /// Transition state: Success → Inert (function deemed inoperable by user).
-    /// Only valid for Success → Inert downgrades. Failure is permanent.
-    pub fn mark_inert(&mut self, reason: &str) -> bool {
-        if self.rating != CoherenceRating::Success {
-            return false;
-        }
-        self.rating = CoherenceRating::Inert;
-        self.evidence.push(format!("INERT: {}", reason));
-        self.updated_at = Utc::now();
-        self.transition_count += 1;
-        true
-    }
-
-    pub fn mark_failure(&mut self, reason: &str) {
-        self.rating = CoherenceRating::Failure;
-        self.evidence.push(format!("FAILURE: {}", reason));
-        self.updated_at = Utc::now();
-        self.transition_count += 1;
-    }
-}
-
-/// Constructive refutation payload sent back to the phone interface
-/// when a user categorization conflicts with established Success nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConstructiveRefutation {
-    pub conflict_id: String,
-    pub user_input_summary: String,
-    pub conflicting_nodes: Vec<CoherenceNode>,
-    pub suggestion: String,
-    pub requires_pdca_recalibration: bool,
-    pub timestamp: DateTime<Utc>,
-}
-
-impl ConstructiveRefutation {
-    pub fn new(
-        user_input: &str,
-        conflicts: Vec<CoherenceNode>,
-        suggestion: &str,
-    ) -> Self {
-        Self {
-            conflict_id: Uuid::new_v4().to_string(),
-            user_input_summary: user_input.to_string(),
-            conflicting_nodes: conflicts,
-            suggestion: suggestion.to_string(),
-            requires_pdca_recalibration: true,
-            timestamp: Utc::now(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub enum AxisKind {
-    Human,
-    Machine,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HumanScoreAxis {
-    Physical,
-    Economic,
-    Intellectual,
-    Psychological,
-}
-
-impl HumanScoreAxis {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Physical => "physical",
-            Self::Economic => "economic",
-            Self::Intellectual => "intellectual",
-            Self::Psychological => "psychological",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MachineScoreAxis {
-    Operational,
-    Structural,
-    Informational,
-    Energetic,
-}
-
-impl MachineScoreAxis {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Operational => "operational",
-            Self::Structural => "structural",
-            Self::Informational => "informational",
-            Self::Energetic => "energetic",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ActionDomain {
-    Fabricate,
-    Study,
-    Construct,
-    Bond,
-    Heal,
-}
-
-impl ActionDomain {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Fabricate => "FABRICATE",
-            Self::Study => "STUDY",
-            Self::Construct => "CONSTRUCT",
-            Self::Bond => "BOND",
-            Self::Heal => "HEAL",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ActionMode {
-    Lift,
-    Rest,
-    Create,
-    Walk,
-    Work,
-    Learn,
-}
-
-impl ActionMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Lift => "LIFT",
-            Self::Rest => "REST",
-            Self::Create => "CREATE",
-            Self::Walk => "WALK",
-            Self::Work => "WORK",
-            Self::Learn => "LEARN",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DomainDef {
-    pub name: String,
-    pub category: Option<String>,
-    pub domain: ActionDomain,
-    pub mode: ActionMode,
-    pub axis_kind: AxisKind,
-    pub axis_human: Option<HumanScoreAxis>,
-    pub axis_machine: Option<MachineScoreAxis>,
-    pub unit: String,
-    pub hints: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     pub id: String,
-    pub name: String,
-    pub domain_name: String,
+    pub embedding: Vec<f32>,
     pub progress: Score,
-    pub priority: Option<u32>,
-    pub tags: Vec<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
 }
 
 impl Goal {
-    pub fn new(name: &str, domain_name: &str) -> Self {
-        let now = Utc::now();
+    pub fn new_vec(embedding: Vec<f32>) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_string(),
-            domain_name: domain_name.to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
+            embedding,
             progress: 0.0,
-            priority: None,
-            tags: vec![],
-            created_at: now,
-            updated_at: now,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PersonalEntity {
+/// A dream is a generated vector from source vectors. No types, descriptions, or paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dream {
     pub id: String,
-    pub name: String,
-    pub category: String,
-    pub description: String,
-    pub associations: Vec<String>,
-    pub metadata: HashMap<String, String>,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
+    pub source: Vec<f32>,
+    pub embedding: Vec<f32>,
+    pub grade: Option<Score>,
 }
 
-impl PersonalEntity {
-    pub fn new(name: &str, category: &str) -> Self {
-        let now = Utc::now();
+impl Dream {
+    pub fn new(source: Vec<f32>, embedding: Vec<f32>) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_string(),
-            category: category.to_string(),
-            description: String::new(),
-            associations: vec![],
-            metadata: HashMap::new(),
-            first_seen: now,
-            last_seen: now,
+            id: uuid::Uuid::new_v4().to_string(),
+            source,
+            embedding,
+            grade: None,
         }
     }
 }
 
+/// Coherence is purely geometric — a node is just a vector with a density score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoherenceNode {
+    pub id: String,
+    pub embedding: Vec<f32>,
+    pub coherence_score: Score,
+}
+
+impl CoherenceNode {
+    pub fn new(embedding: Vec<f32>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            embedding,
+            coherence_score: 0.0,
+        }
+    }
+}
+
+/// An experience is a vector delta — before → after. No action text or rationale.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Experience {
     pub id: String,
     pub goal_id: String,
-    pub action: String,
-    pub rationale: String,
+    pub before: Vec<f32>,
+    pub after: Vec<f32>,
+    pub delta: Vec<f32>,
     pub grade: Score,
-    pub scores: HashMap<String, Score>,
-    pub timestamp: DateTime<Utc>,
 }
 
 impl Experience {
-    pub fn new(goal_id: &str, action: &str, grade: Score, rationale: &str) -> Self {
+    pub fn new(goal_id: &str, before: Vec<f32>, after: Vec<f32>) -> Self {
+        let delta: Vec<f32> = before.iter().zip(after.iter()).map(|(b, a)| a - b).collect();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
             goal_id: goal_id.to_string(),
-            action: action.to_string(),
-            rationale: rationale.to_string(),
-            grade,
-            scores: HashMap::new(),
-            timestamp: Utc::now(),
+            before,
+            after,
+            delta,
+            grade: 0.0,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DreamType {
-    Mutation,
-    Graft,
-    Prune,
-    CrossPollination,
+/// Filtered context is a vector. No cleaned text, no vector_context string.
+#[derive(Debug, Clone, Serialize)]
+pub struct FilteredContext {
+    pub embedding: Vec<f32>,
+    pub valid: bool,
+    pub token_estimate: usize,
 }
 
-impl DreamType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Mutation => "MUTATION",
-            Self::Graft => "GRAFT",
-            Self::Prune => "PRUNE",
-            Self::CrossPollination => "CROSS_POLLINATION",
+/// Constructive refutation — kept for the consistency checker, but now vector-based.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstructiveRefutation {
+    pub conflict_id: String,
+    pub query_embedding: Vec<f32>,
+    pub conflicting_node_ids: Vec<String>,
+    pub suggestion: String,
+    pub coherence_gap: Score,
+}
+
+impl ConstructiveRefutation {
+    pub fn new(query_embedding: Vec<f32>, conflicting_ids: Vec<String>, suggestion: &str, gap: Score) -> Self {
+        Self {
+            conflict_id: uuid::Uuid::new_v4().to_string(),
+            query_embedding,
+            conflicting_node_ids: conflicting_ids,
+            suggestion: suggestion.to_string(),
+            coherence_gap: gap,
         }
     }
 }
 
+/// CertifiedBranch — no label, no domain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Dream {
-    pub id: String,
-    pub dream_type: DreamType,
-    pub source_goal_id: String,
-    pub source_path: Vec<String>,
-    pub variation: Vec<String>,
-    pub description: String,
-    pub created_at: DateTime<Utc>,
-    pub grade: Option<Score>,
+pub struct CertifiedBranch {
+    pub branch_id: String,
+    pub node_ids: Vec<String>,
+    pub centroid: Vec<f32>,
+    pub stability_score: Score,
+}
+
+/// IsolatedBranch — no label, no contradiction text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IsolatedBranch {
+    pub branch_id: String,
+    pub node_ids: Vec<String>,
+    pub outlier_score: Score,
+}
+
+/// DreamResult — no scenario text, no collapse_chain text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DreamResult {
+    pub dream_id: String,
+    pub nodes_tested: Vec<String>,
+    pub outcome: f32,
+    pub prevented_failure: bool,
+    pub coherence_delta: Score,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,7 +164,7 @@ pub struct Entity {
     pub name: String,
     pub kind: String,
     pub description: Option<String>,
-    pub attributes: HashMap<String, String>,
+    pub attributes: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,7 +177,7 @@ pub struct Relationship {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OntologicalMap {
-    pub entities: HashMap<String, Entity>,
+    pub entities: std::collections::HashMap<String, Entity>,
     pub relationships: Vec<Relationship>,
 }
 
@@ -418,4 +209,25 @@ impl OntologicalMap {
         }
         self.relationships.extend(other.relationships);
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainDef {
+    pub name: String,
+    pub category: Option<String>,
+    pub unit: String,
+    pub hints: Vec<String>,
+}
+
+// ── Helper: cosine similarity (used throughout) ───────────────────────
+
+pub fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+    (dot / (na * nb)).clamp(-1.0, 1.0)
+}
+
+pub fn cosine_dist(a: &[f32], b: &[f32]) -> f32 {
+    1.0 - cosine_sim(a, b)
 }
