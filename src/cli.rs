@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use crate::actor::PDCActor;
 use crate::config::{OntologyLoader, PhysisConfig};
 use crate::dream::DreamEngine;
+use crate::linguistic::{LinguisticLense, LinguisticRouter};
 use crate::mapper::OntologyMapper;
 use crate::models::{Goal, Score};
 use crate::network::NetworkScanner;
@@ -68,6 +69,14 @@ pub enum Commands {
     Stats,
     /// Print config
     Config,
+    /// Translate text through a linguistic lense
+    Translate {
+        /// Text to translate
+        text: String,
+        /// Lense to apply (wenyan, piraha, sanskrit). If omitted, applies all enabled.
+        #[arg(short, long)]
+        lense: Option<String>,
+    },
 }
 
 /// Top-level application state: config, ontology, mapper, PDCA actor, dream engine, goals.
@@ -90,7 +99,7 @@ impl PhysisApp {
     /// Build a new PhysisApp from config — loads ontology, creates mapper, actor, dream engine.
     pub fn new(config: PhysisConfig) -> Self {
         let ontology = OntologyLoader::load_all(&config);
-        let mapper = OntologyMapper::new(ontology.clone());
+        let mapper = OntologyMapper::new(ontology.clone(), config.embed_dim);
         let actor = PDCActor::new(config.pdca_stagnant_threshold, config.pdca_stagnant_window);
         let dreams = DreamEngine::new();
 
@@ -242,6 +251,33 @@ No other text."#.into(),
             out.push_str(&format!("  stagnant_goals: {}\n", actor_stats.stagnant_count));
         }
         out
+    }
+
+    /// Translate `text` through the specified lense (or all enabled lenses).
+    pub fn run_translate(&self, text: &str, lense: Option<&str>) -> String {
+        let router = LinguisticRouter::with_config(&self.config.linguistic);
+        match lense {
+            Some(l) => {
+                let lense = match l.to_lowercase().as_str() {
+                    "wenyan" => LinguisticLense::Wenyan,
+                    "piraha" => LinguisticLense::Piraha,
+                    "sanskrit" => LinguisticLense::Sanskrit,
+                    _ => return format!("Unknown lense: {l}. Use: wenyan, piraha, sanskrit"),
+                };
+                router.route(text, lense)
+            }
+            None => {
+                let results = router.route_all(text);
+                if results.is_empty() {
+                    return "No lenses are enabled.".to_string();
+                }
+                results
+                    .iter()
+                    .map(|(k, v)| format!("[{}] {}", k.as_str(), v))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
     }
 }
 

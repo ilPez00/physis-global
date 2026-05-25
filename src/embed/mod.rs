@@ -20,6 +20,15 @@ pub trait VectorEmbed: Send + Sync {
     fn dimension(&self) -> usize;
 }
 
+impl<T: VectorEmbed + ?Sized> VectorEmbed for Box<T> {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        (**self).embed(text)
+    }
+    fn dimension(&self) -> usize {
+        (**self).dimension()
+    }
+}
+
 /// Hash a text into n-gram hashes using SHA-256.
 fn hash_ngrams(text: &str, n: usize) -> Vec<u64> {
     let padded = format!(" {text} ");

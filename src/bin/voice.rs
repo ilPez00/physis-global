@@ -47,8 +47,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared_state: SharedState = Arc::new(Mutex::new(AppState::default()));
     let config = PhysisConfig::default();
     let ontology = OntologyLoader::load_all(&config);
-    let mapper = physis::OntologyMapper::new(ontology);
-    let embedder = RandomProjectionEmbedder::new(64);
+    let mapper = physis::OntologyMapper::new(ontology, config.embed_dim);
+    let embedder = RandomProjectionEmbedder::new(config.embed_dim);
     let mut dream_engine = DreamEngine::new();
 
     // Start Web Server

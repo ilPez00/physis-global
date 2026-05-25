@@ -6,6 +6,8 @@ pub mod wenyan;
 
 use std::collections::HashMap;
 
+use crate::config::LinguisticConfig;
+
 /// Which linguistic transformation to apply to text data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinguisticLense {
@@ -37,6 +39,8 @@ pub struct LinguisticRouter {
     pub piraha: piraha::PirahaFilter,
     /// Sanskrit engine (poetic expansion).
     pub sanskrit: sanskrit::SanskritEngine,
+    /// Which lenses are enabled at runtime.
+    enabled: LinguisticConfig,
 }
 
 impl LinguisticRouter {
@@ -46,11 +50,36 @@ impl LinguisticRouter {
             wenyan: wenyan::WenyanFilter::new(),
             piraha: piraha::PirahaFilter::new(),
             sanskrit: sanskrit::SanskritEngine::new(),
+            enabled: LinguisticConfig::default(),
+        }
+    }
+
+    /// Create a router that honours the enabled/disabled flags in `config`.
+    /// Disabled lenses return the input text unchanged.
+    pub fn with_config(config: &LinguisticConfig) -> Self {
+        Self {
+            wenyan: wenyan::WenyanFilter::new(),
+            piraha: piraha::PirahaFilter::new(),
+            sanskrit: sanskrit::SanskritEngine::new(),
+            enabled: config.clone(),
+        }
+    }
+
+    /// Whether a given lense is active.
+    pub fn is_enabled(&self, lense: LinguisticLense) -> bool {
+        match lense {
+            LinguisticLense::Wenyan => self.enabled.wenyan_enabled,
+            LinguisticLense::Piraha => self.enabled.piraha_enabled,
+            LinguisticLense::Sanskrit => self.enabled.sanskrit_enabled,
         }
     }
 
     /// Transform `raw_data` through the specified lense.
+    /// Returns the input unchanged if the lense is disabled.
     pub fn route(&self, raw_data: &str, lense: LinguisticLense) -> String {
+        if !self.is_enabled(lense) {
+            return raw_data.to_string();
+        }
         match lense {
             LinguisticLense::Piraha => self.piraha.filter(raw_data),
             LinguisticLense::Wenyan => self.wenyan.compress(raw_data),
@@ -58,11 +87,27 @@ impl LinguisticRouter {
         }
     }
 
-    /// Apply all three lenses and return a map from lense to result.
+    /// Return the list of enabled lense variants.
+    pub fn enabled_lenses(&self) -> Vec<LinguisticLense> {
+        let mut v = Vec::new();
+        if self.is_enabled(LinguisticLense::Wenyan) {
+            v.push(LinguisticLense::Wenyan);
+        }
+        if self.is_enabled(LinguisticLense::Piraha) {
+            v.push(LinguisticLense::Piraha);
+        }
+        if self.is_enabled(LinguisticLense::Sanskrit) {
+            v.push(LinguisticLense::Sanskrit);
+        }
+        v
+    }
+
+    /// Apply all enabled lenses and return a map from lense to result.
+    /// Disabled lenses are omitted from the map.
     pub fn route_all(&self, raw_data: &str) -> HashMap<LinguisticLense, String> {
         let mut results = HashMap::new();
-        for lense in &[LinguisticLense::Wenyan, LinguisticLense::Piraha, LinguisticLense::Sanskrit] {
-            results.insert(*lense, self.route(raw_data, *lense));
+        for lense in self.enabled_lenses() {
+            results.insert(lense, self.route(raw_data, lense));
         }
         results
     }
@@ -136,5 +181,48 @@ mod tests {
         assert_eq!(router.route("", LinguisticLense::Wenyan), "");
         assert_eq!(router.route("", LinguisticLense::Piraha), "");
         assert_eq!(router.route("", LinguisticLense::Sanskrit), "");
+    }
+
+    #[test]
+    fn test_router_disabled_lense_returns_input() {
+        let cfg = LinguisticConfig {
+            wenyan_enabled: false,
+            ..LinguisticConfig::default()
+        };
+        let router = LinguisticRouter::with_config(&cfg);
+        assert_eq!(router.route("hello world", LinguisticLense::Wenyan), "hello world");
+    }
+
+    #[test]
+    fn test_router_all_skips_disabled() {
+        let cfg = LinguisticConfig {
+            piraha_enabled: false,
+            sanskrit_enabled: false,
+            ..LinguisticConfig::default()
+        };
+        let router = LinguisticRouter::with_config(&cfg);
+        let results = router.route_all("some text");
+        assert_eq!(results.len(), 1);
+        assert!(results.contains_key(&LinguisticLense::Wenyan));
+    }
+
+    #[test]
+    fn test_router_all_enabled_three_lenses() {
+        let cfg = LinguisticConfig::default();
+        let router = LinguisticRouter::with_config(&cfg);
+        let results = router.route_all("test");
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_router_all_disabled_empty_map() {
+        let cfg = LinguisticConfig {
+            wenyan_enabled: false,
+            piraha_enabled: false,
+            sanskrit_enabled: false,
+        };
+        let router = LinguisticRouter::with_config(&cfg);
+        let results = router.route_all("test");
+        assert!(results.is_empty());
     }
 }

@@ -13,14 +13,16 @@ use crate::trie::DynamicVectorTrie;
 pub struct OntologyMapper {
     pub ontology: OntologyLoader,
     pub trie: DynamicVectorTrie,
+    embed_dim: usize,
 }
 
 impl OntologyMapper {
-    /// Creates a new mapper with the given ontology definition.
-    pub fn new(ontology: OntologyLoader) -> Self {
+    /// Creates a new mapper with the given ontology definition and embedding dimension.
+    pub fn new(ontology: OntologyLoader, embed_dim: usize) -> Self {
         Self {
             ontology,
             trie: DynamicVectorTrie::new(),
+            embed_dim,
         }
     }
 
@@ -32,7 +34,7 @@ impl OntologyMapper {
     ) -> Vec<Goal> {
         let files = scanner::scan_project(root_dir, extra_exclude);
         let mut goals = Vec::new();
-        let embedder = RandomProjectionEmbedder::new(64);
+        let embedder = RandomProjectionEmbedder::new(self.embed_dim);
 
         for file in &files {
             let path_str = file.structural_path();
@@ -123,7 +125,7 @@ mod tests {
     fn test_mapper_filesystem() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         let dir = std::env::temp_dir().join("physis_mapper_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -140,7 +142,7 @@ mod tests {
     fn test_query() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         mapper.trie.insert_path("project/philosophy/identity");
         mapper.trie.insert_path("project/ai/memory");
@@ -153,7 +155,7 @@ mod tests {
     fn test_map_empty_directory() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         let dir = std::env::temp_dir().join("physis_mapper_empty_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -168,7 +170,7 @@ mod tests {
     fn test_query_no_match() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mapper = OntologyMapper::new(ontology);
+        let mapper = OntologyMapper::new(ontology, 64);
 
         let results = mapper.query("nonexistent_query");
         assert!(results.is_empty());
@@ -178,7 +180,7 @@ mod tests {
     fn test_structural_lines_in_trie() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         let dir = std::env::temp_dir().join("physis_mapper_struct_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -195,7 +197,7 @@ mod tests {
     fn test_map_goals_to_trie() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         let embedder = RandomProjectionEmbedder::new(64);
         let goals = vec![
@@ -212,7 +214,7 @@ mod tests {
     fn test_stats_after_mapping() {
         let config = PhysisConfig::default();
         let ontology = OntologyLoader::load_all(&config);
-        let mut mapper = OntologyMapper::new(ontology);
+        let mut mapper = OntologyMapper::new(ontology, 64);
 
         mapper.trie.insert_path("test/stats/path");
         let s = mapper.stats();

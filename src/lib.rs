@@ -40,7 +40,7 @@
 //!
 //! let config = PhysisConfig::default();
 //! let ontology = physis::OntologyLoader::load_all(&config);
-//! let mut mapper = OntologyMapper::new(ontology);
+//! let mut mapper = OntologyMapper::new(ontology, 384);
 //! let goals = mapper.map_filesystem(std::path::Path::new("/some/dir"), None);
 //! println!("Found {} goals", goals.len());
 //! ```
@@ -53,7 +53,10 @@ pub mod config;
 pub mod core;
 pub mod dream;
 pub mod embed;
+pub mod graph;
 pub mod mapper;
+pub mod rachmaninov;
+pub mod storage;
 pub mod models;
 pub mod ontology;
 pub mod ontology_nonhuman;

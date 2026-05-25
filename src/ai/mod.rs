@@ -12,6 +12,7 @@ pub mod memory;
 pub mod provider;
 pub mod session;
 pub mod tools;
+pub mod onnx_worker;
 
 /// Result type for all AI operations.
 pub type AiResult<T> = Result<T, AiError>;

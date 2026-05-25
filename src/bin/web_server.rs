@@ -15,18 +15,20 @@ use physis::config::{OntologyLoader, PhysisConfig};
 use physis::core::PhysisCore;
 use physis::dream::DreamEngine;
 use physis::embed::{RandomProjectionEmbedder, VectorEmbed};
+use physis::linguistic::{LinguisticLense, LinguisticRouter};
 use physis::mapper::OntologyMapper;
 use physis::models::{Goal, Score};
 use physis::CoherenceSnapshot;
 
 struct AppState {
+    config: PhysisConfig,
     core: PhysisCore,
     mapper: OntologyMapper,
     actor: PDCActor,
     dreams: DreamEngine,
     ontology: OntologyLoader,
     goals: Vec<Goal>,
-    embedder: RandomProjectionEmbedder,
+    embedder: Box<dyn VectorEmbed>,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -115,6 +117,17 @@ struct CompressResponse {
     compressed: String,
     input_count: usize,
     output_chars: usize,
+}
+
+#[derive(Deserialize)]
+struct TranslateRequest {
+    text: String,
+    lense: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TranslateResponse {
+    results: std::collections::HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -264,6 +277,35 @@ async fn compress_logs_handler(
     })
 }
 
+async fn translate_handler(
+    State(state): State<SharedState>,
+    Json(req): Json<TranslateRequest>,
+) -> Json<TranslateResponse> {
+    let s = state.lock().unwrap();
+    let router = LinguisticRouter::with_config(&s.config.linguistic);
+    let mut results = std::collections::HashMap::new();
+    match req.lense {
+        Some(ref l) => {
+            let lense = match l.to_lowercase().as_str() {
+                "wenyan" => LinguisticLense::Wenyan,
+                "piraha" => LinguisticLense::Piraha,
+                "sanskrit" => LinguisticLense::Sanskrit,
+                _ => {
+                    results.insert("error".to_string(), format!("Unknown lense: {l}. Use: wenyan, piraha, sanskrit"));
+                    return Json(TranslateResponse { results });
+                }
+            };
+            results.insert(lense.as_str().to_string(), router.route(&req.text, lense));
+        }
+        None => {
+            for (lense, text) in router.route_all(&req.text) {
+                results.insert(lense.as_str().to_string(), text);
+            }
+        }
+    }
+    Json(TranslateResponse { results })
+}
+
 async fn ingest_prompt_handler(
     State(state): State<SharedState>,
     Json(req): Json<serde_json::Value>,
@@ -354,13 +396,23 @@ async fn main() {
 
     let config = PhysisConfig::default();
     let ontology = OntologyLoader::load_all(&config);
-    let mapper = OntologyMapper::new(ontology.clone());
+    let mapper = OntologyMapper::new(ontology.clone(), config.embed_dim);
     let actor = PDCActor::new(config.pdca_stagnant_threshold, config.pdca_stagnant_window);
     let dreams = DreamEngine::new();
     let core = PhysisCore::new();
-    let embedder = RandomProjectionEmbedder::new(384);
+    let embedder: Box<dyn VectorEmbed> = {
+        #[cfg(feature = "embed-onnx")]
+        if config.onnx.enabled {
+            Box::new(physis::embed::onnx::OnnxEmbedder::with_config(&config.onnx))
+        } else {
+            Box::new(RandomProjectionEmbedder::new(config.embed_dim))
+        }
+        #[cfg(not(feature = "embed-onnx"))]
+        Box::new(RandomProjectionEmbedder::new(config.embed_dim))
+    };
 
     let state = Arc::new(Mutex::new(AppState {
+        config,
         core,
         mapper,
         actor,
@@ -386,6 +438,7 @@ async fn main() {
         .route("/api/v1/pdca/act", post(pdca_act_handler))
         .route("/api/v1/pdca/stats", get(pdca_stats_handler))
         .route("/api/v1/reconstruct", post(reconstruct_handler))
+        .route("/api/v1/translate", post(translate_handler))
         .with_state(state);
 
     let port = std::env::var("PHYSIS_PORT").unwrap_or_else(|_| "19876".to_string());

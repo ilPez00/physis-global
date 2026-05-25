@@ -8,6 +8,8 @@ use std::sync::Mutex;
 
 use ort::value::{DynTensorValueType, Tensor};
 
+use crate::config::OnnxConfig;
+
 /// Embedder that loads an ONNX MiniLM model for semantic embeddings.
 ///
 /// Falls back to deterministic random projection when the model or tokenizer
@@ -22,11 +24,15 @@ pub struct OnnxEmbedder {
 }
 
 impl OnnxEmbedder {
-    /// Create a new ONNX embedder. If `model_dir` does not contain
-    /// `model.onnx` and `tokenizer.json`, all embeddings fall back to
-    /// deterministic random projection.
-    pub fn new(model_dir: &str) -> Self {
-        let dim = 384;
+    /// Create a new ONNX embedder with parameters from an `OnnxConfig`.
+    ///
+    /// If the model directory does not contain `model.onnx` and
+    /// `tokenizer.json`, all embeddings fall back to deterministic random
+    /// projection.
+    pub fn with_config(config: &OnnxConfig) -> Self {
+        let dim = config.dim;
+        let max_length = config.max_length;
+        let model_dir = config.model_dir.as_deref().unwrap_or("./models");
         let model_path = Path::new(model_dir).join("model.onnx");
         let tok_path = Path::new(model_dir).join("tokenizer.json");
 
@@ -49,8 +55,16 @@ impl OnnxEmbedder {
             session: Mutex::new(session),
             tokenizer,
             model_path: model_dir.to_string(),
-            max_length: 128,
+            max_length,
         }
+    }
+
+    /// Create a new ONNX embedder with default parameters (dim=384, max_length=128).
+    pub fn new(model_dir: &str) -> Self {
+        Self::with_config(&OnnxConfig {
+            model_dir: Some(model_dir.to_string()),
+            ..OnnxConfig::default()
+        })
     }
 
     /// True when both the ONNX session and tokenizer are loaded successfully.

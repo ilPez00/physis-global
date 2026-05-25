@@ -65,6 +65,10 @@ fn main() -> anyhow::Result<()> {
             let config_str = serde_json::to_string_pretty(&PhysisConfig::default())?;
             println!("{config_str}");
         }
+        Commands::Translate { text, lense } => {
+            let output = app.run_translate(&text, lense.as_deref());
+            println!("{output}");
+        }
     }
 
     Ok(())

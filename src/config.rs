@@ -14,10 +14,55 @@ static BUILTIN_HUMAN_JSON: &str = include_str!("../config/praxis_ontology.json")
 static BUILTIN_MACHINE_JSON: &str = include_str!("../config/machine_ontology.json");
 static DEFAULT_PHYSIS_DIR: &str = ".physis";
 
+/// Controls which linguistic lenses (Wenyan, Piraha, Sanskrit) are active at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinguisticConfig {
+    /// Apply Wenyan kanji-heavy compression.
+    pub wenyan_enabled: bool,
+    /// Apply Piraha filler-stripping minimalism.
+    pub piraha_enabled: bool,
+    /// Apply Sanskrit poetic expansion.
+    pub sanskrit_enabled: bool,
+}
+
+impl Default for LinguisticConfig {
+    fn default() -> Self {
+        Self {
+            wenyan_enabled: true,
+            piraha_enabled: true,
+            sanskrit_enabled: true,
+        }
+    }
+}
+
+/// Runtime parameters for the ONNX MiniLM embedder (used behind `embed-onnx` feature).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnnxConfig {
+    /// Whether to attempt ONNX embedding at runtime. Falls back to RP when unavailable.
+    pub enabled: bool,
+    /// Directory containing model.onnx and tokenizer.json. Uses `./models` when None.
+    pub model_dir: Option<String>,
+    /// Embedding vector dimension (must match the ONNX model output).
+    pub dim: usize,
+    /// Maximum sequence length for tokenization.
+    pub max_length: usize,
+}
+
+impl Default for OnnxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_dir: None,
+            dim: 384,
+            max_length: 128,
+        }
+    }
+}
+
 /// Top-level configuration for a Physis engine instance.
 ///
 /// Controls data directories, ontology sources, network scanning, dream batching,
-/// and PDCA stagnation detection parameters.
+/// PDCA stagnation detection parameters, linguistic lenses, and embedder settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysisConfig {
     /// Directory for persistent data (hash cache, logs, etc.).
@@ -34,6 +79,12 @@ pub struct PhysisConfig {
     pub pdca_stagnant_window: usize,
     /// Directories to watch for file changes.
     pub watch_dirs: Vec<PathBuf>,
+    /// Linguistic lense toggles (Wenyan, Piraha, Sanskrit).
+    pub linguistic: LinguisticConfig,
+    /// ONNX embedder tuning parameters.
+    pub onnx: OnnxConfig,
+    /// Embedding vector dimension for all embedders (RP and ONNX).
+    pub embed_dim: usize,
 }
 
 /// Describes a single ontology source: built-in (no path) or file-based.
@@ -73,6 +124,9 @@ impl Default for PhysisConfig {
             pdca_stagnant_threshold: 0.2,
             pdca_stagnant_window: 5,
             watch_dirs: vec![],
+            linguistic: LinguisticConfig::default(),
+            onnx: OnnxConfig::default(),
+            embed_dim: 384,
         }
     }
 }

@@ -23,7 +23,7 @@ fn test_mediation_pipeline() {
     // Step 2: OntologyMapper
     let config = PhysisConfig::default();
     let ontology = OntologyLoader::load_all(&config);
-    let mut mapper = OntologyMapper::new(ontology);
+    let mut mapper = OntologyMapper::new(ontology, 64);
     let goals = mapper.map_filesystem(&dir, None);
     assert!(!goals.is_empty(), "mapper must produce goals");
 
