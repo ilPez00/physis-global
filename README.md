@@ -303,6 +303,16 @@ curl -X POST http://127.0.0.1:19876/api/v1/classify \
 
 At startup, all 511 ontology entries are embedded (name + hints concatenated) and averaged per DOMAIN×MODE cell. At query time, the same embedder scores input text against all centroids via cosine similarity.
 
+## Future: Multi-Modal & Gemma Re-ranking
+
+See `DEVELOPMENT_PLAN.md` Phase 6 for the full roadmap. Short version:
+
+- **Multi-embedder registry** — CLIP, Jina v2, SigLIP for text+image in shared vector space
+- **Jina v2** recommended primary (1024-d, multilingual, beats CLIP)
+- **Ontology expansion** — fill all 30 cells to 30+ entries each (900+ total), human+machine
+- **Gemma re-ranker** — vector classify first (5ms), fall back to Gemma for ambiguous cases
+- **Gemma as pure mapper** — optional mode: skip centroids, use Gemma prompt for all classification. Trade: 5ms→5s per query, but with reasoning and context awareness
+
 ### ONNX MiniLM
 
 For production-grade semantic embeddings (instead of deterministic random projection):
