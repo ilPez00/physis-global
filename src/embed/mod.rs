@@ -5,13 +5,18 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use sha2::{Sha256, Digest};
 
-/// Trait for embedding text into fixed-dimension vectors.
+/// Trait for embedding text and images into fixed-dimension vectors.
 ///
-/// Implementors must guarantee that the same input text always produces the
+/// Implementors must guarantee that the same input always produces the
 /// same vector (determinism). The vector must be L2-normalized (unit length).
 pub trait VectorEmbed: Send + Sync {
     /// Embed a single text string into a fixed-dimension vector.
     fn embed(&self, text: &str) -> Vec<f32>;
+    /// Embed an image (raw bytes, e.g. JPEG/PNG) into a fixed-dimension vector.
+    /// Returns None if this embedder doesn't support images.
+    fn embed_image(&self, _bytes: &[u8]) -> Option<Vec<f32>> {
+        None
+    }
     /// Embed multiple texts in batch. Default impl calls `embed` for each.
     fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
         texts.iter().map(|t| self.embed(t)).collect()
@@ -23,6 +28,9 @@ pub trait VectorEmbed: Send + Sync {
 impl<T: VectorEmbed + ?Sized> VectorEmbed for Box<T> {
     fn embed(&self, text: &str) -> Vec<f32> {
         (**self).embed(text)
+    }
+    fn embed_image(&self, bytes: &[u8]) -> Option<Vec<f32>> {
+        (**self).embed_image(bytes)
     }
     fn dimension(&self) -> usize {
         (**self).dimension()
@@ -121,6 +129,15 @@ impl VectorEmbed for RandomProjectionEmbedder {
 
 #[cfg(feature = "embed-onnx")]
 pub mod onnx;
+
+#[cfg(feature = "embed-onnx")]
+pub mod clip;
+
+#[cfg(feature = "embed-onnx")]
+pub mod jina;
+
+#[cfg(feature = "embed-onnx")]
+pub mod registry;
 
 #[cfg(test)]
 mod tests {

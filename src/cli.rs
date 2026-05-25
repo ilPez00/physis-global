@@ -7,8 +7,15 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use crate::actor::PDCActor;
-use crate::config::{OntologyLoader, PhysisConfig};
+use crate::config::{EmbedderKindConfig, OntologyLoader, PhysisConfig};
 use crate::dream::DreamEngine;
+#[cfg(feature = "embed-onnx")]
+use crate::embed::clip::ClipEmbedder;
+#[cfg(feature = "embed-onnx")]
+use crate::embed::jina::JinaEmbedder;
+#[cfg(feature = "embed-onnx")]
+use crate::embed::onnx::OnnxEmbedder;
+use crate::embed::RandomProjectionEmbedder;
 use crate::embed::VectorEmbed;
 use crate::linguistic::{LinguisticLense, LinguisticRouter};
 use crate::mapper::OntologyMapper;
@@ -116,13 +123,45 @@ impl PhysisApp {
 
         let embedder: Box<dyn VectorEmbed> = {
             #[cfg(feature = "embed-onnx")]
-            if config.onnx.enabled {
-                Box::new(crate::embed::onnx::OnnxEmbedder::with_config(&config.onnx))
-            } else {
-                Box::new(crate::embed::RandomProjectionEmbedder::new(config.embed_dim))
+            {
+                let try_primary = || -> Option<Box<dyn VectorEmbed>> {
+                    let ec = config.embedders.primary.as_ref()?;
+                    if !ec.enabled { return None; }
+                    match ec.kind {
+                        EmbedderKindConfig::JinaV2 => {
+                            let j = JinaEmbedder::with_model_dir(&ec.model_dir);
+                            j.is_available().then(|| Box::new(j) as Box<dyn VectorEmbed>)
+                        }
+                        EmbedderKindConfig::Clip => {
+                            let c = ClipEmbedder::with_config(&config.onnx);
+                            c.is_available().then(|| Box::new(c) as Box<dyn VectorEmbed>)
+                        }
+                        EmbedderKindConfig::MiniLM => {
+                            let m = OnnxEmbedder::with_config(&config.onnx);
+                            m.is_available().then(|| Box::new(m) as Box<dyn VectorEmbed>)
+                        }
+                        EmbedderKindConfig::RandomProjection => {
+                            Some(Box::new(RandomProjectionEmbedder::new(config.embed_dim)))
+                        }
+                    }
+                };
+                try_primary()
+                    .or_else(|| {
+                        let j = JinaEmbedder::with_model_dir("models/jina-clip-v2");
+                        j.is_available().then(|| Box::new(j) as Box<dyn VectorEmbed>)
+                    })
+                    .or_else(|| {
+                        let c = ClipEmbedder::with_config(&config.onnx);
+                        c.is_available().then(|| Box::new(c) as Box<dyn VectorEmbed>)
+                    })
+                    .or_else(|| {
+                        let m = OnnxEmbedder::with_config(&config.onnx);
+                        m.is_available().then(|| Box::new(m) as Box<dyn VectorEmbed>)
+                    })
+                    .unwrap_or_else(|| Box::new(RandomProjectionEmbedder::new(config.embed_dim)))
             }
             #[cfg(not(feature = "embed-onnx"))]
-            Box::new(crate::embed::RandomProjectionEmbedder::new(config.embed_dim))
+            Box::new(RandomProjectionEmbedder::new(config.embed_dim))
         };
 
         // Pre-compute centroids per DOMAIN×MODE cell
@@ -339,9 +378,23 @@ No other text."#.into(),
     /// Classify a text file against the semiotic grid.
     /// Returns a formatted map: ranked domain×mode cells with scores + contributing entries.
     pub fn run_classify(&self, file: &std::path::Path) -> anyhow::Result<String> {
-        let text = std::fs::read_to_string(file)
-            .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", file.display(), e))?;
-        let embedding = self.embedder.embed(&text);
+        // Determine if it's an image file
+        let is_image = matches!(
+            file.extension().and_then(|e| e.to_str()),
+            Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp")
+        );
+
+        let embedding = if is_image {
+            let bytes = std::fs::read(file)
+                .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", file.display(), e))?;
+            self.embedder.embed_image(&bytes)
+                .ok_or_else(|| anyhow::anyhow!("Image embedding not available for this embedder"))
+                .map_err(|e| anyhow::anyhow!("Failed to classify image {}: {}", file.display(), e))?
+        } else {
+            let text = std::fs::read_to_string(file)
+                .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", file.display(), e))?;
+            self.embedder.embed(&text)
+        };
 
         let mut results: Vec<(&str, &str, f32, Vec<&str>)> = Vec::new();
         for (key, centroid) in &self.cell_centroids {

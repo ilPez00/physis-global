@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Physis standalone classify — map a .txt file onto the semiotic grid.
+# Physis standalone classify — map a .txt or image file onto the semiotic grid.
 # Usage: ./physis.sh /path/to/file.txt
+#        ./physis.sh /path/to/image.jpg
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

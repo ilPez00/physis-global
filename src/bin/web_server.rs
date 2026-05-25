@@ -10,11 +10,20 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use base64::Engine;
+
 use physis::actor::PDCActor;
-use physis::config::{OntologyLoader, PhysisConfig};
+use physis::config::{EmbedderKindConfig, OntologyLoader, PhysisConfig};
 use physis::core::PhysisCore;
 use physis::dream::DreamEngine;
-use physis::embed::{RandomProjectionEmbedder, VectorEmbed};
+use physis::embed::VectorEmbed;
+#[cfg(feature = "embed-onnx")]
+use physis::embed::clip::ClipEmbedder;
+#[cfg(feature = "embed-onnx")]
+use physis::embed::jina::JinaEmbedder;
+#[cfg(feature = "embed-onnx")]
+use physis::embed::onnx::OnnxEmbedder;
+use physis::embed::RandomProjectionEmbedder;
 use physis::linguistic::{LinguisticLense, LinguisticRouter};
 use physis::mapper::OntologyMapper;
 use physis::models::{Goal, Score, HumanDomain, HumanMode, SemioticGrid};
@@ -39,6 +48,7 @@ struct AppState {
     ingest: Arc<IngestRing>,
     /// Pre-computed centroid embeddings for each DOMAIN×MODE cell
     cell_centroids: HashMap<String, Vec<f32>>,
+    embed_dim: usize,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -630,6 +640,10 @@ async fn heatmap_handler(
 #[derive(Deserialize)]
 struct ClassifyRequest {
     text: String,
+    /// Optional base64-encoded image bytes (PNG/JPEG). If present, image
+    /// embedding is used instead of text embedding.
+    #[serde(default)]
+    image: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -651,7 +665,24 @@ async fn classify_handler(
     Json(req): Json<ClassifyRequest>,
 ) -> Json<ClassifyResponse> {
     let s = state.lock().unwrap();
-    let embedding = s.embedder.embed(&req.text);
+
+    // Embed: use image if provided, otherwise text
+    let embedding = if let Some(ref b64) = req.image {
+        match base64::engine::general_purpose::STANDARD.decode(b64) {
+            Ok(bytes) => {
+                s.embedder.embed_image(&bytes).unwrap_or_else(|| {
+                    log::warn!("image embedding not available; falling back to text");
+                    s.embedder.embed(&req.text)
+                })
+            }
+            Err(e) => {
+                log::warn!("base64 decode failed: {e}; falling back to text");
+                s.embedder.embed(&req.text)
+            }
+        }
+    } else {
+        s.embedder.embed(&req.text)
+    };
 
     let mut results: Vec<ClassifyResult> = Vec::new();
     for (key, centroid) in &s.cell_centroids {
@@ -704,14 +735,48 @@ async fn main() {
 
     let embedder: Box<dyn VectorEmbed> = {
         #[cfg(feature = "embed-onnx")]
-        if config.onnx.enabled {
-            Box::new(physis::embed::onnx::OnnxEmbedder::with_config(&config.onnx))
-        } else {
-            Box::new(RandomProjectionEmbedder::new(config.embed_dim))
+        {
+            // Try the configured primary embedder, then fall through Jina → CLIP → MiniLM → RP
+            let try_primary = || -> Option<Box<dyn VectorEmbed>> {
+                let ec = config.embedders.primary.as_ref()?;
+                if !ec.enabled { return None; }
+                match ec.kind {
+                    EmbedderKindConfig::JinaV2 => {
+                        let j = JinaEmbedder::with_model_dir(&ec.model_dir);
+                        j.is_available().then(|| Box::new(j) as Box<dyn VectorEmbed>)
+                    }
+                    EmbedderKindConfig::Clip => {
+                        let c = ClipEmbedder::with_config(&config.onnx);
+                        c.is_available().then(|| Box::new(c) as Box<dyn VectorEmbed>)
+                    }
+                    EmbedderKindConfig::MiniLM => {
+                        let m = OnnxEmbedder::with_config(&config.onnx);
+                        m.is_available().then(|| Box::new(m) as Box<dyn VectorEmbed>)
+                    }
+                    EmbedderKindConfig::RandomProjection => {
+                        Some(Box::new(RandomProjectionEmbedder::new(config.embed_dim)))
+                    }
+                }
+            };
+            try_primary()
+                .or_else(|| {
+                    let j = JinaEmbedder::with_model_dir("models/jina-clip-v2");
+                    j.is_available().then(|| Box::new(j) as Box<dyn VectorEmbed>)
+                })
+                .or_else(|| {
+                    let c = ClipEmbedder::with_config(&config.onnx);
+                    c.is_available().then(|| Box::new(c) as Box<dyn VectorEmbed>)
+                })
+                .or_else(|| {
+                    let m = OnnxEmbedder::with_config(&config.onnx);
+                    m.is_available().then(|| Box::new(m) as Box<dyn VectorEmbed>)
+                })
+                .unwrap_or_else(|| Box::new(RandomProjectionEmbedder::new(config.embed_dim)))
         }
         #[cfg(not(feature = "embed-onnx"))]
         Box::new(RandomProjectionEmbedder::new(config.embed_dim))
     };
+    let embed_dim = embedder.dimension();
 
     // Pre-compute centroid embeddings per DOMAIN×MODE cell from ontology hints
     let mut cell_centroids: HashMap<String, (Vec<f32>, usize)> = HashMap::new();
@@ -758,6 +823,7 @@ async fn main() {
         rachmaninov: rachmaninov.clone(),
         ingest: ingest.clone(),
         cell_centroids,
+        embed_dim,
     }));
 
     let state_clone = state.clone();

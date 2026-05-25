@@ -55,6 +55,47 @@ pub struct OnnxConfig {
     pub max_length: usize,
 }
 
+/// Which embedder kind to use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EmbedderKindConfig {
+    #[serde(rename = "random-projection")]
+    RandomProjection,
+    #[serde(rename = "minilm")]
+    MiniLM,
+    #[serde(rename = "clip")]
+    Clip,
+    #[serde(rename = "jina-v2")]
+    JinaV2,
+}
+
+/// Configuration for a single embedder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedderConfig {
+    pub kind: EmbedderKindConfig,
+    /// Directory containing model files.
+    pub model_dir: String,
+    /// Whether this embedder is enabled.
+    #[serde(default = "return_true")]
+    pub enabled: bool,
+}
+
+fn return_true() -> bool { true }
+
+/// Multi-embedder configuration block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddersConfig {
+    /// Primary embedder for text (and optionally image).
+    pub primary: Option<EmbedderConfig>,
+    /// Optional image-only embedder (if primary doesn't handle images).
+    pub image: Option<EmbedderConfig>,
+}
+
+impl Default for EmbeddersConfig {
+    fn default() -> Self {
+        Self { primary: None, image: None }
+    }
+}
+
 impl Default for OnnxConfig {
     fn default() -> Self {
         Self {
@@ -92,6 +133,8 @@ pub struct PhysisConfig {
     pub onnx: OnnxConfig,
     /// Embedding vector dimension for all embedders (RP and ONNX).
     pub embed_dim: usize,
+    /// Multi-embedder configuration (optional, overrides onnx fallback).
+    pub embedders: EmbeddersConfig,
 }
 
 /// Describes a single ontology source: built-in (no path) or file-based.
@@ -176,6 +219,7 @@ impl Default for PhysisConfig {
             linguistic: LinguisticConfig::default(),
             onnx: OnnxConfig::default(),
             embed_dim: 384,
+            embedders: EmbeddersConfig::default(),
         }
     }
 }

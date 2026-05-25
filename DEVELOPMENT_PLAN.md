@@ -95,13 +95,15 @@ distributed dream synchronization.
 
 ---
 
-## Phase 6: Multi-Modal Embedding & Ontology Expansion ⬅️ NEXT
+## Phase 6: Multi-Modal Embedding & Ontology Expansion 🔄 IN PROGRESS
 
 This phase is the answer to: *"What if we could classify images, audio, processes — not just text? And what if the ontology was deep enough to distinguish a welding robot from a chef?"*
 
 ### 6A. Multi-Embedder Architecture
 
 Replace the single `Box<dyn VectorEmbed>` with a **trait-typed registry** that dispatches by modality and model type.
+
+**Status**: ✅ Done — `EmbedderRegistry`, `EmbedderKindConfig`, `EmbeddersConfig` in `config.rs`; fallback chain primary → Jina → CLIP → MiniLM → RP in both `web_server.rs` and `cli.rs`.
 
 **Design**:
 
@@ -152,7 +154,9 @@ pub struct EmbedderRegistry {
 
 **Key files**: `src/embed/registry.rs` (new), `src/config.rs` (extend), `src/bin/web_server.rs` (use registry).
 
-### 6B. CLIP Implementation (OpenAI)
+### 6B. CLIP Implementation (OpenAI) ✅ Done
+
+**Status**: ✅ `src/embed/clip.rs` implements `ClipEmbedder` with separate ONNX sessions for text and vision, L2-normalized 512-d output, uses Xenova pre-exported models from HuggingFace.
 
 **Download** (user-side, one command):
 
@@ -193,7 +197,9 @@ impl ClipEmbedder {
 
 **CLIP's superpower**: text and image live in the same vector space. You can classify an image without any image-specific centroid — just embed the photo and compare against the same text centroids. A photo of a gym gets HEAL×LIFT 0.91 automatically.
 
-### 6C. Jina CLIP v2 Implementation
+### 6C. Jina CLIP v2 Implementation ✅ Done
+
+**Status**: ✅ `src/embed/jina.rs` implements `JinaEmbedder` with fused ONNX session for text+vision, pre-normalized 1024-d outputs, dummy tensors for single-modality runs.
 
 **Download**:
 
@@ -310,18 +316,18 @@ Text: "chopping vegetables for a hearty soup"
 
 ### 6H. Implementation Order
 
-| Step | What | Depends On | Effort |
-|------|------|-----------|--------|
-| 1 | `EmbedderRegistry` struct + config | — | 1 day |
-| 2 | CLIP text embedder (`src/embed/clip.rs`) | Steps 1 | 2 days |
-| 3 | CLIP vision embedder | Steps 2 | 2 days |
-| 4 | Jina v2 text+vision embedder (`src/embed/jina.rs`) | Steps 1 | 2 days |
-| 5 | SigLIP embedder (drop-in) | Steps 1 | 1 day |
-| 6 | ImageBind Python sidecar (optional) | Steps 1 | 2 days |
-| 7 | Ontology expansion — fill 30 cells to 30+ entries each | — | 3 days |
-| 8 | Multi-modal classify endpoint — accepts text, base64 image, audio URL | Steps 3, 4 | 1 day |
-| 9 | Gemma re-ranker — confidence-gated generative path | Steps 8 | 2 days |
-| 10 | Process embedding — task graph → vector via Gemma structural summarization | Steps 9 | 2 days |
+| Step | What | Depends On | Effort | Status |
+|------|------|-----------|--------|--------|
+| 1 | `EmbedderRegistry` struct + config | — | 1 day | ✅ Done |
+| 2 | CLIP text embedder (`src/embed/clip.rs`) | Steps 1 | 2 days | ✅ Done |
+| 3 | CLIP vision embedder | Steps 2 | 2 days | ✅ Done |
+| 4 | Jina v2 text+vision embedder (`src/embed/jina.rs`) | Steps 1 | 2 days | ✅ Done |
+| 5 | SigLIP embedder (drop-in) | Steps 1 | 1 day | ⬜ Pending |
+| 6 | ImageBind Python sidecar (optional) | Steps 1 | 2 days | ⬜ Pending |
+| 7 | Ontology expansion — fill 30 cells to 30+ entries each | — | 3 days | ⬜ Pending |
+| 8 | Multi-modal classify endpoint — accepts text + base64 image | Steps 3, 4 | 1 day | ✅ Done |
+| 9 | Gemma re-ranker — confidence-gated generative path | Steps 8 | 2 days | ⬜ Pending |
+| 10 | Process embedding — task graph → vector via Gemma structural summarization | Steps 9 | 2 days | ⬜ Pending |
 
 ### 6I. Key Decisions
 
