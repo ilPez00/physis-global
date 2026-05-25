@@ -1,6 +1,7 @@
 //! CLI application orchestrator — parses subcommands via clap and dispatches
 //! to PhysisApp methods for scanning, querying, dreaming, and evaluating.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -8,6 +9,7 @@ use clap::{Parser, Subcommand};
 use crate::actor::PDCActor;
 use crate::config::{OntologyLoader, PhysisConfig};
 use crate::dream::DreamEngine;
+use crate::embed::VectorEmbed;
 use crate::linguistic::{LinguisticLense, LinguisticRouter};
 use crate::mapper::OntologyMapper;
 use crate::models::{Goal, Score};
@@ -77,6 +79,11 @@ pub enum Commands {
         #[arg(short, long)]
         lense: Option<String>,
     },
+    /// Classify a text file against the semiotic grid and output a map
+    Classify {
+        /// Path to .txt file
+        file: PathBuf,
+    },
 }
 
 /// Top-level application state: config, ontology, mapper, PDCA actor, dream engine, goals.
@@ -93,6 +100,10 @@ pub struct PhysisApp {
     pub dreams: DreamEngine,
     /// Current vector-space goals.
     pub goals: Vec<Goal>,
+    /// Embedder for classify.
+    embedder: Box<dyn VectorEmbed>,
+    /// Pre-computed centroids per DOMAIN\x00MODE cell.
+    cell_centroids: HashMap<String, Vec<f32>>,
 }
 
 impl PhysisApp {
@@ -103,6 +114,49 @@ impl PhysisApp {
         let actor = PDCActor::new(config.pdca_stagnant_threshold, config.pdca_stagnant_window);
         let dreams = DreamEngine::new();
 
+        let embedder: Box<dyn VectorEmbed> = {
+            #[cfg(feature = "embed-onnx")]
+            if config.onnx.enabled {
+                Box::new(crate::embed::onnx::OnnxEmbedder::with_config(&config.onnx))
+            } else {
+                Box::new(crate::embed::RandomProjectionEmbedder::new(config.embed_dim))
+            }
+            #[cfg(not(feature = "embed-onnx"))]
+            Box::new(crate::embed::RandomProjectionEmbedder::new(config.embed_dim))
+        };
+
+        // Pre-compute centroids per DOMAIN×MODE cell
+        let mut centroid_sums: HashMap<String, (Vec<f32>, usize)> = HashMap::new();
+        for def in ontology.human_domains.values() {
+            let domain = match def.domain.as_deref() {
+                Some(d) => d,
+                None => continue,
+            };
+            let mode = match def.mode.as_deref() {
+                Some(m) => m,
+                None => continue,
+            };
+            let mut text = def.name.clone();
+            for hint in &def.hints {
+                text.push(' ');
+                text.push_str(hint);
+            }
+            let emb = embedder.embed(&text);
+            let key = format!("{domain}\x00{mode}");
+            let entry = centroid_sums.entry(key).or_insert((vec![0.0f32; emb.len()], 0));
+            for (i, v) in emb.iter().enumerate() {
+                entry.0[i] += v;
+            }
+            entry.1 += 1;
+        }
+        let cell_centroids: HashMap<String, Vec<f32>> = centroid_sums
+            .into_iter()
+            .map(|(k, (sum, count))| {
+                let n = count as f32;
+                (k, sum.into_iter().map(|v| v / n).collect())
+            })
+            .collect();
+
         Self {
             config,
             ontology,
@@ -110,6 +164,8 @@ impl PhysisApp {
             actor,
             dreams,
             goals: Vec::new(),
+            embedder,
+            cell_centroids,
         }
     }
 
@@ -278,6 +334,47 @@ No other text."#.into(),
                     .join("\n")
             }
         }
+    }
+
+    /// Classify a text file against the semiotic grid.
+    /// Returns a formatted map: ranked domain×mode cells with scores + contributing entries.
+    pub fn run_classify(&self, file: &std::path::Path) -> anyhow::Result<String> {
+        let text = std::fs::read_to_string(file)
+            .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", file.display(), e))?;
+        let embedding = self.embedder.embed(&text);
+
+        let mut results: Vec<(&str, &str, f32, Vec<&str>)> = Vec::new();
+        for (key, centroid) in &self.cell_centroids {
+            let score = crate::models::cosine_sim(&embedding, centroid);
+            let mut parts = key.splitn(2, '\x00');
+            let (domain, mode) = match (parts.next(), parts.next()) {
+                (Some(d), Some(m)) => (d, m),
+                _ => continue,
+            };
+            let entries: Vec<&str> = self.ontology.human_domains.values()
+                .filter(|def| def.domain.as_deref() == Some(domain) && def.mode.as_deref() == Some(mode))
+                .map(|def| def.name.as_str())
+                .collect();
+            results.push((domain, mode, score, entries));
+        }
+        results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut out = String::new();
+        out.push_str(&format!("━━━ Physis Classification Map ━━━\n"));
+        out.push_str(&format!("File: {}\n\n", file.display()));
+        for (i, (domain, mode, score, entries)) in results.iter().enumerate() {
+            if i == 0 {
+                out.push_str(&format!("★ TOP: {}×{} — {:.3}\n", domain, mode, score));
+                out.push_str(&format!("   {}", entries.join(", ")));
+                out.push('\n');
+                out.push('\n');
+            } else if *score > 0.6 {
+                out.push_str(&format!("  {}×{} — {:.3}\n", domain, mode, score));
+                out.push_str(&format!("   {}\n", entries.join(", ")));
+            }
+        }
+        out.push_str(&format!("\n{} cells scored (threshold >0.6 shown)\n", results.len()));
+        Ok(out)
     }
 }
 

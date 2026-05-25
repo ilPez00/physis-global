@@ -69,6 +69,10 @@ fn main() -> anyhow::Result<()> {
             let output = app.run_translate(&text, lense.as_deref());
             println!("{output}");
         }
+        Commands::Classify { file } => {
+            let output = app.run_classify(&file)?;
+            println!("{output}");
+        }
     }
 
     Ok(())
