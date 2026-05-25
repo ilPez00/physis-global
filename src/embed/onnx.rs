@@ -168,3 +168,71 @@ fn fallback_embed(text: &str, dim: usize) -> Vec<f32> {
     v.iter_mut().for_each(|x| *x /= norm);
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_unavailable_embedder() -> OnnxEmbedder {
+        let dir = std::env::temp_dir().join(format!("physis-onnx-test-{}", std::process::id()));
+        OnnxEmbedder::new(dir.to_str().unwrap())
+    }
+
+    #[test]
+    fn test_onnx_embedder_not_available() {
+        let e = temp_unavailable_embedder();
+        assert!(!e.is_available());
+    }
+
+    #[test]
+    fn test_onnx_fallback_embed_dimension() {
+        let e = temp_unavailable_embedder();
+        let v = e.embed("hello");
+        assert_eq!(v.len(), 384);
+    }
+
+    #[test]
+    fn test_onnx_fallback_embed_deterministic() {
+        let e = temp_unavailable_embedder();
+        let v1 = e.embed("hello world");
+        let v2 = e.embed("hello world");
+        assert_eq!(v1, v2);
+    }
+
+    #[test]
+    fn test_onnx_fallback_embed_normalized() {
+        let e = temp_unavailable_embedder();
+        let v = e.embed("test");
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_onnx_fallback_embed_different_inputs_differ() {
+        let e = temp_unavailable_embedder();
+        let v1 = e.embed("foo");
+        let v2 = e.embed("bar");
+        assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_onnx_fallback_embed_empty() {
+        let e = temp_unavailable_embedder();
+        let v = e.embed("");
+        assert_eq!(v.len(), 384);
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_onnx_dimension() {
+        let e = temp_unavailable_embedder();
+        assert_eq!(e.dimension(), 384);
+    }
+
+    #[test]
+    fn test_onnx_model_path_stored() {
+        let e = temp_unavailable_embedder();
+        assert!(e.model_path.contains("physis-onnx-test"));
+    }
+}

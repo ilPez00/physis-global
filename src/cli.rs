@@ -226,3 +226,152 @@ No other text."#.into(),
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn test_cli_parser_scan() {
+        let cli = Cli::try_parse_from(["physis", "scan", "/tmp"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Scan { dir, format } => {
+                assert_eq!(dir, std::path::PathBuf::from("/tmp"));
+                assert_eq!(format, "wiki");
+            }
+            _ => panic!("expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_scan_with_format() {
+        let cli = Cli::try_parse_from(["physis", "scan", "/tmp", "--format", "json"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Scan { format, .. } => assert_eq!(format, "json"),
+            _ => panic!("expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_query() {
+        let cli = Cli::try_parse_from(["physis", "query", "hello world"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Query { query, max_results } => {
+                assert_eq!(query, "hello world");
+                assert_eq!(max_results, 10);
+            }
+            _ => panic!("expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_dream() {
+        let cli = Cli::try_parse_from(["physis", "dream"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Dream { count } => assert_eq!(count, 5),
+            _ => panic!("expected Dream command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_evaluate() {
+        let cli = Cli::try_parse_from(["physis", "evaluate", "dream-1", "0.85"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Evaluate { id, grade } => {
+                assert_eq!(id, "dream-1");
+                assert!((grade - 0.85).abs() < 1e-6);
+            }
+            _ => panic!("expected Evaluate command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_stats() {
+        let cli = Cli::try_parse_from(["physis", "stats"]);
+        assert!(cli.is_ok());
+        assert!(matches!(cli.unwrap().command, Commands::Stats));
+    }
+
+    #[test]
+    fn test_cli_parser_config() {
+        let cli = Cli::try_parse_from(["physis", "config"]);
+        assert!(cli.is_ok());
+        assert!(matches!(cli.unwrap().command, Commands::Config));
+    }
+
+    #[test]
+    fn test_cli_parser_watch() {
+        let cli = Cli::try_parse_from(["physis", "watch", "/dir1", "/dir2"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Commands::Watch { dirs } => assert_eq!(dirs.len(), 2),
+            _ => panic!("expected Watch command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parser_unknown_command_fails() {
+        let cli = Cli::try_parse_from(["physis", "bogus"]);
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn test_cli_parser_missing_arg_fails() {
+        let cli = Cli::try_parse_from(["physis", "scan"]);
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn test_cli_command_factory_usage() {
+        let cli = Cli::command();
+        let name = cli.get_name();
+        assert_eq!(name, "physis");
+    }
+
+    #[test]
+    fn test_app_new_with_default_config() {
+        let config = PhysisConfig::default();
+        let app = PhysisApp::new(config);
+        assert!(app.goals.is_empty());
+        assert!(app.actor.stats(&[]).total_actions == 0);
+    }
+
+    #[test]
+    fn test_run_stats_empty() {
+        let config = PhysisConfig::default();
+        let app = PhysisApp::new(config);
+        let stats = app.run_stats();
+        assert!(stats.contains("Physis Stats"));
+        assert!(stats.contains("total_actions: 0"));
+    }
+
+    #[test]
+    fn test_run_query_empty() {
+        let config = PhysisConfig::default();
+        let app = PhysisApp::new(config);
+        let results = app.run_query("nonexistent", 5);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_run_dream_empty_goals() {
+        let config = PhysisConfig::default();
+        let mut app = PhysisApp::new(config);
+        let dreams = app.run_dream(3);
+        assert_eq!(dreams.len(), 0, "no goals means no dreams");
+    }
+
+    #[test]
+    fn test_run_evaluate_nonexistent() {
+        let config = PhysisConfig::default();
+        let mut app = PhysisApp::new(config);
+        let result = app.run_evaluate("bogus", 0.5);
+        assert!(!result);
+    }
+}

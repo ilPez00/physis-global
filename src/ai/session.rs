@@ -207,3 +207,115 @@ impl Session {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_new_defaults() {
+        let s = Session::new("You are Physis.");
+        assert_eq!(s.config.system_prompt, "You are Physis.");
+        assert_eq!(s.config.max_tokens, 4096);
+        assert!(s.history.is_empty());
+    }
+
+    #[test]
+    fn test_push_context_text_only() {
+        let mut s = Session::new("test");
+        s.push_context("some context here", None, "COHERENCE");
+        assert_eq!(s.history.len(), 1);
+        assert_eq!(s.history[0].role, "user");
+        match &s.history[0].content {
+            Content::Parts(parts) => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].type_, "text");
+                assert!(parts[0].text.as_ref().unwrap().contains("some context here"));
+            }
+            _ => panic!("expected Content::Parts"),
+        }
+    }
+
+    #[test]
+    fn test_push_context_with_image() {
+        let mut s = Session::new("test");
+        s.push_context("what is this", Some("base64data=="), "DATA");
+        assert_eq!(s.history.len(), 1);
+        match &s.history[0].content {
+            Content::Parts(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[1].type_, "image_url");
+                assert!(parts[1].image_url.as_ref().unwrap().url.contains("base64data=="));
+            }
+            _ => panic!("expected Content::Parts"),
+        }
+    }
+
+    #[test]
+    fn test_provider_names_never_panics() {
+        let s = Session::new("test");
+        let _names = s.provider_names();
+    }
+
+    #[test]
+    fn test_tool_names_has_builtins() {
+        let s = Session::new("test");
+        assert!(!s.tool_names().is_empty(), "ToolRegistry has built-in tools");
+    }
+
+    #[test]
+    fn test_trim_history_below_max() {
+        let mut s = Session::new("test");
+        for i in 0..20 {
+            s.push_context(&format!("ctx {i}"), None, "COHERENCE");
+        }
+        assert_eq!(s.history.len(), 20);
+    }
+
+    #[test]
+    fn test_trim_history_trims_past_max() {
+        let mut s = Session::new("test");
+        let overflow = MAX_HISTORY + 10;
+        for i in 0..overflow {
+            s.push_context(&format!("ctx {i}"), None, "COHERENCE");
+        }
+        assert_eq!(s.history.len(), MAX_HISTORY, "history must be trimmed to MAX_HISTORY");
+    }
+
+    #[test]
+    fn test_trim_history_preserves_system_messages() {
+        let mut s = Session::new("test");
+        s.history.push(Message {
+            role: "system".into(),
+            content: Content::Text("sys".into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+        for i in 0..MAX_HISTORY + 5 {
+            s.push_context(&format!("ctx {i}"), None, "COHERENCE");
+        }
+        assert!(s.history.iter().any(|m| m.role == "system"), "system messages must survive trim");
+    }
+
+    #[test]
+    fn test_trim_history_no_crash_empty() {
+        let mut s = Session::new("test");
+        s.trim_history();
+        assert!(s.history.is_empty());
+    }
+
+    #[test]
+    fn test_trim_history_removes_oldest_non_system() {
+        let mut s = Session::new("test");
+        for i in 0..MAX_HISTORY + 10 {
+            s.push_context(&format!("ctx {i}"), None, "COHERENCE");
+        }
+        let texts: Vec<&str> = s.history.iter().filter_map(|m| match &m.content {
+            Content::Parts(parts) => parts.first().and_then(|p| p.text.as_deref()),
+            Content::Text(t) => Some(t.as_str()),
+        }).collect();
+        assert!(texts.iter().any(|t| t.contains("ctx 30")), "should contain latest entries");
+        assert!(!texts.iter().any(|t| t.contains("ctx 0")), "oldest entries should be trimmed");
+    }
+}

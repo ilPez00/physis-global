@@ -59,3 +59,23 @@ impl McpClient {
         anyhow::bail!("MCP client not yet implemented; use the CLI instead")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_client_new() {
+        let client = McpClient::new("http://localhost:9876");
+        assert!(client.base_url.contains("localhost"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_client_send_command_returns_error() {
+        let client = McpClient::new("http://localhost:9876");
+        let result = client.send_command("physis_health", &[]).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not yet implemented"));
+    }
+}

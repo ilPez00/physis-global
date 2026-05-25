@@ -50,3 +50,100 @@ pub fn enrich_nonhuman_goal(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample_domains() -> HashMap<String, DomainDef> {
+        [(
+            "testing".into(),
+            DomainDef {
+                name: "testing".into(),
+                category: Some("qa".into()),
+                unit: "tests".into(),
+                hints: vec!["assert".into(), "verify".into()],
+            },
+        )]
+        .into()
+    }
+
+    #[test]
+    fn test_machine_constants() {
+        assert_eq!(MACHINE_ONTOLOGY_NAME, "machine_ontology");
+        assert_eq!(MACHINE_TYPE, "machine");
+    }
+
+    #[test]
+    fn test_resolve_nonhuman_by_exact_name() {
+        let domains = sample_domains();
+        let result = resolve_nonhuman_domain("testing", &domains);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "testing");
+    }
+
+    #[test]
+    fn test_resolve_nonhuman_by_hint() {
+        let domains = sample_domains();
+        let result = resolve_nonhuman_domain("assert_all_the_things", &domains);
+        assert!(result.is_some(), "should match via 'assert' hint");
+        assert_eq!(result.unwrap().name, "testing");
+    }
+
+    #[test]
+    fn test_resolve_nonhuman_by_name_lowercase() {
+        let domains = sample_domains();
+        let result = resolve_nonhuman_domain("Testing stuff", &domains);
+        assert!(result.is_some(), "should match via case-insensitive name");
+        assert_eq!(result.unwrap().name, "testing");
+    }
+
+    #[test]
+    fn test_resolve_nonhuman_unknown() {
+        let domains = sample_domains();
+        let result = resolve_nonhuman_domain("unknown_thing", &domains);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_nonhuman_empty_domains() {
+        let domains = HashMap::new();
+        let result = resolve_nonhuman_domain("anything", &domains);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_enrich_nonhuman_goal_found() {
+        let domains = sample_domains();
+        let goal = Goal::new_vec(vec![0.1, 0.2]);
+        let goal = Goal {
+            id: "testing".into(),
+            ..goal
+        };
+        let s = enrich_nonhuman_goal(&goal, &domains);
+        assert!(s.contains("[testing +tests]"));
+        assert!(s.contains("[MACHINE]"));
+        assert!(s.contains("progress=0%"));
+    }
+
+    #[test]
+    fn test_enrich_nonhuman_goal_unknown() {
+        let domains = sample_domains();
+        let goal = Goal::new_vec(vec![0.1, 0.2]);
+        let s = enrich_nonhuman_goal(&goal, &domains);
+        assert!(s.contains("[UNKNOWN_MACHINE_DOMAIN]"));
+    }
+
+    #[test]
+    fn test_enrich_nonhuman_goal_progress_format() {
+        let domains = sample_domains();
+        let goal = Goal {
+            id: "verify_ok".into(),
+            embedding: vec![0.5; 4],
+            progress: 0.756,
+        };
+        let s = enrich_nonhuman_goal(&goal, &domains);
+        assert!(s.contains("progress=75%"));
+    }
+}

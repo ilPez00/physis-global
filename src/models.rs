@@ -231,3 +231,153 @@ pub fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
 pub fn cosine_dist(a: &[f32], b: &[f32]) -> f32 {
     1.0 - cosine_sim(a, b)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_goal_new_vec() {
+        let g = Goal::new_vec(vec![0.1, 0.2, 0.3]);
+        assert!(!g.id.is_empty());
+        assert_eq!(g.embedding, vec![0.1, 0.2, 0.3]);
+        assert_eq!(g.progress, 0.0);
+    }
+
+    #[test]
+    fn test_dream_new() {
+        let d = Dream::new(vec![1.0, 0.0], vec![0.5, 0.5]);
+        assert!(!d.id.is_empty());
+        assert_eq!(d.source, vec![1.0, 0.0]);
+        assert_eq!(d.embedding, vec![0.5, 0.5]);
+        assert!(d.grade.is_none());
+    }
+
+    #[test]
+    fn test_coherence_node_new() {
+        let c = CoherenceNode::new(vec![0.9, 0.1]);
+        assert!(!c.id.is_empty());
+        assert_eq!(c.embedding, vec![0.9, 0.1]);
+        assert_eq!(c.coherence_score, 0.0);
+    }
+
+    #[test]
+    fn test_experience_new_computes_delta() {
+        let e = Experience::new("goal-1", vec![1.0, 0.0, 0.0], vec![1.0, 0.5, 0.3]);
+        assert_eq!(e.goal_id, "goal-1");
+        assert_eq!(e.before, vec![1.0, 0.0, 0.0]);
+        assert_eq!(e.after, vec![1.0, 0.5, 0.3]);
+        assert_eq!(e.delta, vec![0.0, 0.5, 0.3]);
+        assert_eq!(e.grade, 0.0);
+    }
+
+    #[test]
+    fn test_constructive_refutation_new() {
+        let cr = ConstructiveRefutation::new(
+            vec![0.1, 0.2],
+            vec!["n1".into(), "n2".into()],
+            "merge them",
+            0.85,
+        );
+        assert!(!cr.conflict_id.is_empty());
+        assert_eq!(cr.conflicting_node_ids, vec!["n1", "n2"]);
+        assert_eq!(cr.suggestion, "merge them");
+        assert_eq!(cr.coherence_gap, 0.85);
+    }
+
+    #[test]
+    fn test_ontological_map_add_and_merge() {
+        let mut m = OntologicalMap::new();
+        assert!(m.entities.is_empty());
+        assert!(m.relationships.is_empty());
+
+        let e = Entity {
+            id: "e1".into(),
+            name: "Test".into(),
+            kind: "concept".into(),
+            description: Some("desc".into()),
+            attributes: [("color".into(), "red".into())].into(),
+        };
+        m.add_entity(e.clone());
+        assert_eq!(m.entities.len(), 1);
+
+        let r = Relationship {
+            source: "e1".into(),
+            target: "e2".into(),
+            predicate: "connects_to".into(),
+            weight: 1.0,
+        };
+        m.add_relationship(r);
+        assert_eq!(m.relationships.len(), 1);
+
+        let mut other = OntologicalMap::new();
+        other.add_entity(Entity {
+            id: "e1".into(),
+            name: "Test".into(),
+            kind: "concept".into(),
+            description: Some("updated".into()),
+            attributes: [("size".into(), "big".into())].into(),
+        });
+        other.add_entity(Entity {
+            id: "e3".into(),
+            name: "New".into(),
+            kind: "thing".into(),
+            description: None,
+            attributes: Default::default(),
+        });
+        other.add_relationship(Relationship {
+            source: "e3".into(),
+            target: "e1".into(),
+            predicate: "depends_on".into(),
+            weight: 0.5,
+        });
+
+        m.merge(other);
+        assert_eq!(m.entities.len(), 2);
+        assert_eq!(m.relationships.len(), 2);
+        assert_eq!(m.entities["e1"].description.as_deref(), Some("updated"));
+        assert!(m.entities["e1"].attributes.contains_key("color"));
+        assert!(m.entities["e1"].attributes.contains_key("size"));
+    }
+
+    #[test]
+    fn test_cosine_sim_identical() {
+        let v = vec![0.5, 0.5, 0.5, 0.5];
+        let sim = cosine_sim(&v, &v);
+        assert!((sim - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_sim_opposite() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        let sim = cosine_sim(&a, &b);
+        assert!((sim + 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_sim_orthogonal() {
+        let a = vec![1.0, 0.0];
+        let b = vec![0.0, 1.0];
+        let sim = cosine_sim(&a, &b);
+        assert!(sim.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_sim_zero_vector() {
+        let a = vec![0.0, 0.0];
+        let b = vec![1.0, 0.0];
+        let sim = cosine_sim(&a, &b);
+        assert!(!sim.is_nan());
+        assert!(sim >= -1.0 && sim <= 1.0);
+    }
+
+    #[test]
+    fn test_cosine_dist() {
+        let a = vec![1.0, 0.0];
+        let b = vec![0.0, 1.0];
+        let d = cosine_dist(&a, &b);
+        assert!((d - 1.0).abs() < 1e-6);
+        assert_eq!(cosine_dist(&a, &a), 0.0);
+    }
+}
