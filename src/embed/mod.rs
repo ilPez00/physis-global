@@ -5,14 +5,22 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use sha2::{Sha256, Digest};
 
+/// Trait for embedding text into fixed-dimension vectors.
+///
+/// Implementors must guarantee that the same input text always produces the
+/// same vector (determinism). The vector must be L2-normalized (unit length).
 pub trait VectorEmbed: Send + Sync {
+    /// Embed a single text string into a fixed-dimension vector.
     fn embed(&self, text: &str) -> Vec<f32>;
+    /// Embed multiple texts in batch. Default impl calls `embed` for each.
     fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
         texts.iter().map(|t| self.embed(t)).collect()
     }
+    /// Return the dimension of the embedding vectors.
     fn dimension(&self) -> usize;
 }
 
+/// Hash a text into n-gram hashes using SHA-256.
 fn hash_ngrams(text: &str, n: usize) -> Vec<u64> {
     let padded = format!(" {text} ");
     let chars: Vec<char> = padded.chars().collect();
@@ -27,6 +35,7 @@ fn hash_ngrams(text: &str, n: usize) -> Vec<u64> {
     hashes
 }
 
+/// Generate a random unit vector of dimension `dim` seeded by `seed`.
 fn random_vector(dim: usize, seed: u64) -> Vec<f32> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut v = Vec::with_capacity(dim);
@@ -42,8 +51,10 @@ fn random_vector(dim: usize, seed: u64) -> Vec<f32> {
 }
 
 /// Deterministic random-projection embedder using feature hashing.
-/// Maps any text to a fixed-dimension vector (384 by default).
-/// Same input always produces the same vector.
+///
+/// Maps any text to a fixed-dimension vector (default 384) using locality-sensitive
+/// hashing with random projections. The same input always produces the same vector
+/// (deterministic — seed is fixed at construction).
 pub struct RandomProjectionEmbedder {
     dim: usize,
     seed: u64,
@@ -51,6 +62,9 @@ pub struct RandomProjectionEmbedder {
 }
 
 impl RandomProjectionEmbedder {
+    /// Create a new embedder with the given vector dimension.
+    ///
+    /// Use `384` for compatibility with MiniLM (upgraded via `embed-onnx` feature).
     pub fn new(dim: usize) -> Self {
         Self {
             dim,
@@ -66,6 +80,9 @@ impl RandomProjectionEmbedder {
 }
 
 impl VectorEmbed for RandomProjectionEmbedder {
+    /// Embed text using unigram + bigram feature hashing with random projection.
+    ///
+    /// The output is always L2-normalized (unit length).
     fn embed(&self, text: &str) -> Vec<f32> {
         let lower = text.to_lowercase();
         let mut vec = vec![0.0f32; self.dim];
@@ -95,3 +112,60 @@ impl VectorEmbed for RandomProjectionEmbedder {
 
 #[cfg(feature = "embed-onnx")]
 pub mod onnx;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_embed_deterministic() {
+        let embedder = RandomProjectionEmbedder::new(64);
+        let v1 = embedder.embed("hello world");
+        let v2 = embedder.embed("hello world");
+        assert_eq!(v1, v2, "same input must produce same vector");
+    }
+
+    #[test]
+    fn test_embed_different_inputs_differ() {
+        let embedder = RandomProjectionEmbedder::new(64);
+        let v1 = embedder.embed("hello");
+        let v2 = embedder.embed("world");
+        assert_ne!(v1, v2, "different inputs must produce different vectors");
+    }
+
+    #[test]
+    fn test_embed_normalized() {
+        let embedder = RandomProjectionEmbedder::new(64);
+        let v = embedder.embed("test string");
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "vector must be unit normalized, got {norm}");
+    }
+
+    #[test]
+    fn test_embed_dimension() {
+        let embedder = RandomProjectionEmbedder::new(128);
+        let v = embedder.embed("dim test");
+        assert_eq!(v.len(), 128, "embedding dimension must match constructor");
+    }
+
+    #[test]
+    fn test_embed_empty_string() {
+        let embedder = RandomProjectionEmbedder::new(64);
+        let v = embedder.embed("");
+        assert_eq!(v.len(), 64);
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "empty string must produce normalized vector");
+    }
+
+    #[test]
+    fn test_embed_batch() {
+        let embedder = RandomProjectionEmbedder::new(64);
+        let texts = &["first", "second", "third"];
+        let batch = embedder.embed_batch(texts);
+        assert_eq!(batch.len(), 3);
+        for (i, text) in texts.iter().enumerate() {
+            let single = embedder.embed(text);
+            assert_eq!(batch[i], single, "batch[{i}] must match single embed");
+        }
+    }
+}

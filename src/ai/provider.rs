@@ -1,111 +1,177 @@
+//! LLM provider abstraction with failover cascade.
+//!
+//! [`Provider`] wraps a single LLM API endpoint (OpenAI-compatible). [`ProviderCascade`]
+//! manages multiple providers and routes requests based on task type, availability,
+//! and capability (vision, tools, model class).
+//!
+//! Supports: OpenAI, OpenRouter, Groq, DeepSeek, Gemini, Ollama.
+
 use crate::ai::{AiError, AiResult, tools::ToolDefinition};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
+/// Configuration for a single LLM provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
+    /// Human-readable provider name (e.g. "openai", "groq").
     pub name: String,
+    /// Base URL for the OpenAI-compatible API (e.g. `https://api.openai.com/v1`).
     pub base_url: String,
+    /// Model identifier (e.g. "gpt-4o-mini", "deepseek-chat").
     pub model: String,
+    /// API key for authentication.
     pub api_key: String,
+    /// Whether this provider supports vision/image inputs.
     pub supports_vision: bool,
+    /// Whether this provider supports function/tool calling.
     pub supports_tools: bool,
+    /// Maximum tokens per response.
     pub max_tokens: u32,
+    /// HTTP request timeout in seconds.
     pub timeout_secs: f64,
 }
 
+/// A message in the chat conversation, following the OpenAI schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
+    /// Role: "system", "user", "assistant", or "tool".
     pub role: String,
+    /// Message content (text or multi-part).
     pub content: Content,
+    /// Tool calls (present on assistant messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCallMsg>>,
+    /// ID of the tool call this message responds to (present on tool messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Name of the tool (present on tool messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
+/// Message content — either a plain text string or a list of parts (text + images).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Content {
+    /// Plain text content.
     Text(String),
+    /// Multi-part content (text + image_url parts).
     Parts(Vec<ContentPart>),
 }
 
+/// A single part of a multi-part message content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentPart {
+    /// Part type: "text" or "image_url".
     #[serde(rename = "type")]
     pub type_: String,
+    /// Text content (present when type is "text").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Image URL (present when type is "image_url").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<ImageUrl>,
 }
 
+/// A URL pointing to an image (data URL or remote URL).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageUrl {
+    /// Image URL (data:image/... or https://...).
     pub url: String,
+    /// Detail level: "low" or "high".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
+/// A tool call response from the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallMsg {
+    /// Unique tool call ID.
     pub id: String,
+    /// Always "function".
     #[serde(rename = "type")]
     pub type_: String,
+    /// The function to call.
     pub function: FunctionCall,
 }
 
+/// A function call specification from the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionCall {
+    /// Function/tool name.
     pub name: String,
+    /// JSON-encoded arguments.
     pub arguments: String,
 }
 
+/// A chat completion request, matching the OpenAI API schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
+    /// Model identifier.
     pub model: String,
+    /// Conversation messages.
     pub messages: Vec<Message>,
+    /// Tool definitions (for function calling).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    /// Tool choice policy ("auto", "none", or specific tool).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// Maximum tokens in the response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Sampling temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
 }
 
+/// A chat completion response from the API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
+    /// List of completion choices.
     pub choices: Vec<Choice>,
+    /// Token usage statistics.
     pub usage: Option<Usage>,
 }
 
+/// A single completion choice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Choice {
+    /// The response message.
     pub message: ResponseMessage,
+    /// Why the generation stopped.
     pub finish_reason: Option<String>,
 }
 
+/// The message returned by the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMessage {
+    /// Assistant role.
     pub role: String,
+    /// Response text content.
     #[serde(default)]
     pub content: Option<String>,
+    /// Tool calls made by the model.
     #[serde(default)]
     pub tool_calls: Option<Vec<ToolCallMsg>>,
 }
 
+/// Token usage for a completion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
+    /// Tokens in the prompt.
     pub prompt_tokens: u32,
+    /// Tokens in the completion.
     pub completion_tokens: u32,
+    /// Total tokens.
     pub total_tokens: u32,
 }
 
+/// A single LLM provider backed by an OpenAI-compatible API.
+///
+/// Wraps configuration, per-provider rate-limiting (cooldown), availability
+/// tracking, and HTTP client. Use [`ProviderCascade`] for multi-provider
+/// orchestration.
 pub struct Provider {
     config: ProviderConfig,
     key_idx: AtomicI64,
@@ -115,6 +181,7 @@ pub struct Provider {
 }
 
 impl Provider {
+    /// Create a new provider from its configuration.
     pub fn new(config: ProviderConfig) -> Self {
         let timeout = std::time::Duration::from_secs_f64(config.timeout_secs.max(5.0));
         let client = reqwest::Client::builder()
@@ -130,18 +197,22 @@ impl Provider {
         }
     }
 
+    /// Provider display name.
     pub fn name(&self) -> &str {
         &self.config.name
     }
 
+    /// Model identifier.
     pub fn model(&self) -> &str {
         &self.config.model
     }
 
+    /// Whether this provider supports function calling.
     pub fn supports_tools(&self) -> bool {
         self.config.supports_tools
     }
 
+    /// Whether the provider is currently available (not in cooldown, not marked unavailable).
     pub fn is_available(&self) -> bool {
         self.available.load(Ordering::Relaxed)
             && std::time::SystemTime::now()
@@ -152,6 +223,7 @@ impl Provider {
                 >= self.cooldown_until.load(Ordering::Relaxed)
     }
 
+    /// Put this provider in cooldown for `seconds` seconds.
     pub fn cooldown(&self, seconds: i64) {
         let until = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -161,10 +233,12 @@ impl Provider {
         self.cooldown_until.store(until, Ordering::Relaxed);
     }
 
+    /// Mark this provider as permanently unavailable.
     pub fn mark_unavailable(&self) {
         self.available.store(false, Ordering::Relaxed);
     }
 
+    /// Send a chat completion request to this provider.
     pub async fn complete(
         &self,
         messages: &[Message],
@@ -227,6 +301,7 @@ impl Provider {
             .ok_or_else(|| AiError::Provider("empty response".into()))
     }
 
+    /// Transcribe audio using Whisper.
     pub async fn transcribe(&self, audio_path: &str, model: Option<&str>) -> AiResult<String> {
         let url = format!(
             "{}/audio/transcriptions",
@@ -266,6 +341,7 @@ impl Provider {
         Ok(tr.text)
     }
 
+    /// Translate text to a target language.
     pub async fn translate(&self, text: &str, target_lang: &str) -> AiResult<String> {
         let messages = vec![
             Message {
@@ -283,33 +359,48 @@ impl Provider {
                 name: None,
             }
         ];
-        
+
         let resp = self.complete(&messages, None, None).await?;
         Ok(resp.content.unwrap_or_default())
     }
 }
 
+/// Routing hint produced by [`ProviderCascade::classify`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouteHint {
+    /// Task type: "fast", "smart", or "vision".
     pub task_type: String,
+    /// Whether the request includes an image.
     pub has_image: bool,
 }
 
+/// A cascade of LLM providers with automatic failover.
+///
+/// Routes requests to the best available provider based on the task type,
+/// provider capabilities, and availability. Providers are tried in order
+/// until one succeeds.
 pub struct ProviderCascade {
     providers: Vec<Provider>,
 }
 
 impl ProviderCascade {
+    /// Create an empty cascade.
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
         }
     }
 
+    /// Add a provider to the cascade.
     pub fn add(&mut self, config: ProviderConfig) {
         self.providers.push(Provider::new(config));
     }
 
+    /// Build a cascade from environment variables.
+    ///
+    /// Reads: `AI_OPENROUTER_KEY`, `AI_GROQ_KEY`, `AURA_OPENAI_KEY` / `OPENAI_API_KEY`,
+    /// `AI_DEEPSEEK_KEY`, `AI_GEMINI_KEY`, plus `AURA_BASE_URL` and `AURA_MODEL`.
+    /// Always includes a local Ollama provider at `http://localhost:11434/v1`.
     pub fn from_env() -> Self {
         let mut cascade = Self::new();
 
@@ -388,7 +479,6 @@ impl ProviderCascade {
             });
         }
 
-        // Local Ollama
         cascade.add(ProviderConfig {
             name: "ollama".into(),
             base_url: "http://localhost:11434/v1".into(),
@@ -403,6 +493,7 @@ impl ProviderCascade {
         cascade
     }
 
+    /// Classify a request to determine the best routing strategy.
     pub fn classify(&self, query: &str, has_image: bool) -> RouteHint {
         if has_image {
             return RouteHint {
@@ -418,6 +509,7 @@ impl ProviderCascade {
         }
     }
 
+    /// Get available providers matching a route hint.
     pub fn providers_for_task(&self, route: &RouteHint) -> Vec<&Provider> {
         if route.has_image {
             self.providers
@@ -437,6 +529,7 @@ impl ProviderCascade {
         }
     }
 
+    /// Send a chat completion through the cascade, trying providers in order.
     pub async fn complete(
         &self,
         messages: &[Message],
@@ -473,6 +566,7 @@ impl ProviderCascade {
         Err(AiError::NoProvider)
     }
 
+    /// Translate text using the first available provider.
     pub async fn translate(&self, text: &str, target_lang: &str) -> AiResult<String> {
         let best = self.providers.iter().find(|p| p.is_available());
         if let Some(p) = best {
@@ -481,10 +575,12 @@ impl ProviderCascade {
         Err(AiError::NoProvider)
     }
 
+    /// Get names of all registered providers.
     pub fn provider_names(&self) -> Vec<String> {
         self.providers.iter().map(|p| p.name().to_string()).collect()
     }
 
+    /// Transcribe audio using the first available provider (Groq → OpenAI).
     pub async fn transcribe(&self, audio_path: &str, model: Option<&str>) -> AiResult<String> {
         let groq = self.providers.iter().find(|p| p.name() == "groq");
         if let Some(p) = groq {
@@ -501,5 +597,155 @@ impl ProviderCascade {
 impl Default for ProviderCascade {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_text_serialization() {
+        let msg = Message {
+            role: "user".into(),
+            content: Content::Text("hello".into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("hello"));
+        assert!(json.contains("user"));
+    }
+
+    #[test]
+    fn test_message_parts_serialization() {
+        let msg = Message {
+            role: "user".into(),
+            content: Content::Parts(vec![
+                ContentPart {
+                    type_: "text".into(),
+                    text: Some("describe this".into()),
+                    image_url: None,
+                },
+                ContentPart {
+                    type_: "image_url".into(),
+                    text: None,
+                    image_url: Some(ImageUrl {
+                        url: "data:image/jpeg;base64,abc".into(),
+                        detail: Some("low".into()),
+                    }),
+                },
+            ]),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("describe this"));
+        assert!(json.contains("image_url"));
+        assert!(json.contains("data:image/jpeg;base64,abc"));
+    }
+
+    #[test]
+    fn test_chat_request_serialization() {
+        let req = ChatRequest {
+            model: "gpt-4".into(),
+            messages: vec![Message {
+                role: "system".into(),
+                content: Content::Text("be helpful".into()),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            tools: None,
+            tool_choice: None,
+            max_tokens: Some(100),
+            temperature: Some(0.5),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("gpt-4"));
+        assert!(json.contains("be helpful"));
+        assert!(json.contains("100"));
+    }
+
+    #[test]
+    fn test_provider_new_is_available() {
+        let config = ProviderConfig {
+            name: "test".into(),
+            base_url: "http://localhost".into(),
+            model: "test-model".into(),
+            api_key: "sk-test".into(),
+            supports_vision: false,
+            supports_tools: true,
+            max_tokens: 1024,
+            timeout_secs: 10.0,
+        };
+        let provider = Provider::new(config);
+        assert!(provider.is_available());
+        assert_eq!(provider.name(), "test");
+        assert_eq!(provider.model(), "test-model");
+    }
+
+    #[test]
+    fn test_provider_supports_tools() {
+        let config = ProviderConfig {
+            name: "tooless".into(),
+            base_url: "http://localhost".into(),
+            model: "no-tools".into(),
+            api_key: "sk-nope".into(),
+            supports_vision: false,
+            supports_tools: false,
+            max_tokens: 512,
+            timeout_secs: 5.0,
+        };
+        let provider = Provider::new(config);
+        assert!(!provider.supports_tools());
+    }
+
+    #[test]
+    fn test_cascade_classify_fast() {
+        let cascade = ProviderCascade::new();
+        let route = cascade.classify("short query", false);
+        assert_eq!(route.task_type, "fast");
+        assert!(!route.has_image);
+    }
+
+    #[test]
+    fn test_cascade_classify_long() {
+        let cascade = ProviderCascade::new();
+        let long = "a".repeat(100);
+        let route = cascade.classify(&long, false);
+        assert_eq!(route.task_type, "smart");
+    }
+
+    #[test]
+    fn test_cascade_classify_vision() {
+        let cascade = ProviderCascade::new();
+        let route = cascade.classify("anything", true);
+        assert_eq!(route.task_type, "vision");
+        assert!(route.has_image);
+    }
+
+    #[test]
+    fn test_cascade_empty_providers_for_task() {
+        let cascade = ProviderCascade::new();
+        let route = cascade.classify("test", false);
+        let providers = cascade.providers_for_task(&route);
+        assert!(providers.is_empty());
+    }
+
+    #[test]
+    fn test_cascade_provider_names_empty() {
+        let cascade = ProviderCascade::new();
+        let names = cascade.provider_names();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_cascade_default_is_empty() {
+        let cascade = ProviderCascade::default();
+        let names = cascade.provider_names();
+        assert!(names.is_empty());
     }
 }

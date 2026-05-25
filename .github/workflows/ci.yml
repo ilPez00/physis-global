@@ -44,5 +44,8 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
-      - name: Run guanto tests (explicit)
-        run: cargo test guanto --verbose
+      - name: Run AI and embed tests
+        run: cargo test embed::tests tools::tests provider::tests agent::tests
+
+      - name: Check docs compile
+        run: cargo doc --no-deps --all-features

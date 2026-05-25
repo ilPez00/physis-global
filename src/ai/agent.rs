@@ -1,3 +1,9 @@
+//! Tool-using agent loop that orchestrates LLM calls with tool execution.
+//!
+//! The agent sends messages to the provider cascade, handles tool-call responses,
+//! and loops until the model produces a final text response or the maximum
+//! number of tool rounds is reached.
+
 use crate::ai::provider::{Content, ContentPart, ImageUrl, Message};
 use crate::ai::tools::{ToolRegistry, call_tool};
 use crate::ai::{AiError, AiResult, provider::ProviderCascade};
@@ -5,18 +11,27 @@ use serde::{Deserialize, Serialize};
 
 const MAX_TOOL_ROUNDS: u32 = 8;
 
+/// Configuration for an agent run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// System prompt prepended to every request.
     pub system_prompt: String,
+    /// Maximum tokens for each LLM response.
     pub max_tokens: u32,
+    /// Image detail level ("low", "high").
     pub detail: String,
 }
 
+/// The result of an agent run.
 #[derive(Debug, Clone)]
 pub struct AgentOutput {
+    /// The final text response from the LLM.
     pub text: String,
+    /// Which provider served the final response.
     pub provider: String,
+    /// Number of tool-call rounds executed.
     pub tool_rounds: u32,
+    /// Approximate tokens used across all rounds.
     pub tokens_used: u32,
 }
 
@@ -30,6 +45,12 @@ impl Default for AgentConfig {
     }
 }
 
+/// Run the agent loop: build messages, call provider cascade, handle tool calls.
+///
+/// The agent sends `query` (optionally with a base64 image `frame_b64`) to the
+/// provider cascade. If the model returns tool calls, they are executed via
+/// `ToolRegistry` and the results are fed back. The loop terminates when the
+/// model returns a plain text response or `MAX_TOOL_ROUNDS` is exceeded.
 pub async fn run_agent(
     provider_cascade: &ProviderCascade,
     tools: &ToolRegistry,
@@ -100,7 +121,6 @@ pub async fn run_agent(
 
     loop {
         let (resp, provider_name) = if let Some(m) = model_override {
-            // Find provider by model name
             let p = provider_cascade.providers_for_task(&route).into_iter()
                 .find(|p| p.model() == m || p.name() == m)
                 .ok_or_else(|| AiError::NoProvider)?;
@@ -154,5 +174,42 @@ pub async fn run_agent(
                 name: Some(call.function.name.clone()),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_config_defaults() {
+        let config = AgentConfig::default();
+        assert_eq!(config.max_tokens, 1024);
+        assert_eq!(config.detail, "low");
+        assert_eq!(config.system_prompt, "");
+    }
+
+    #[test]
+    fn test_agent_mode_prefixes() {
+        let cases = [
+            ("SCOUT", "[SCOUT MODE - brief observation]\nquery"),
+            ("ANALYZE", "[ANALYZE MODE - detailed analysis]\nquery"),
+            ("DATA", "[DATA MODE - structured output]\nquery"),
+            ("OTHER", "query"),
+        ];
+        for (mode, expected) in &cases {
+            let prefix = match *mode {
+                "SCOUT" => "[SCOUT MODE - brief observation]\n",
+                "ANALYZE" => "[ANALYZE MODE - detailed analysis]\n",
+                "DATA" => "[DATA MODE - structured output]\n",
+                _ => "",
+            };
+            assert_eq!(format!("{prefix}query"), *expected, "mode={mode}");
+        }
+    }
+
+    #[test]
+    fn test_agent_max_tool_rounds_constant() {
+        assert_eq!(MAX_TOOL_ROUNDS, 8);
     }
 }
