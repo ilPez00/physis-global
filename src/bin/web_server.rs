@@ -37,6 +37,8 @@ struct AppState {
     onnx: Arc<OnnxHolon>,
     rachmaninov: Arc<Mutex<RachmaninovHolon>>,
     ingest: Arc<IngestRing>,
+    /// Pre-computed centroid embeddings for each DOMAIN×MODE cell
+    cell_centroids: HashMap<String, Vec<f32>>,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -623,6 +625,63 @@ async fn heatmap_handler(
     Json(HeatmapResponse { table, matrix })
 }
 
+// ── Classify Handler ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ClassifyRequest {
+    text: String,
+}
+
+#[derive(Serialize, Clone)]
+struct ClassifyResult {
+    domain: String,
+    mode: String,
+    score: f32,
+    entries: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ClassifyResponse {
+    results: Vec<ClassifyResult>,
+    top: ClassifyResult,
+}
+
+async fn classify_handler(
+    State(state): State<SharedState>,
+    Json(req): Json<ClassifyRequest>,
+) -> Json<ClassifyResponse> {
+    let s = state.lock().unwrap();
+    let embedding = s.embedder.embed(&req.text);
+
+    let mut results: Vec<ClassifyResult> = Vec::new();
+    for (key, centroid) in &s.cell_centroids {
+        let score = physis::models::cosine_sim(&embedding, centroid);
+        let parts: Vec<&str> = key.splitn(2, '\x00').collect();
+        let (domain, mode) = if parts.len() == 2 {
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            continue;
+        };
+        let mut entries: Vec<String> = Vec::new();
+        if let (Some(d), Some(m)) = (HumanDomain::from_str(&domain), HumanMode::from_str(&mode)) {
+            for def in s.ontology.human_domains.values() {
+                if def.domain.as_deref() == Some(&domain) && def.mode.as_deref() == Some(&mode) {
+                    entries.push(def.name.clone());
+                }
+            }
+        }
+        results.push(ClassifyResult { domain, mode, score, entries });
+    }
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let top = results.first().cloned().unwrap_or(ClassifyResult {
+        domain: "unknown".into(),
+        mode: "unknown".into(),
+        score: 0.0,
+        entries: vec![],
+    });
+    Json(ClassifyResponse { results, top })
+}
+
 // ── Main ──────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -654,6 +713,38 @@ async fn main() {
         Box::new(RandomProjectionEmbedder::new(config.embed_dim))
     };
 
+    // Pre-compute centroid embeddings per DOMAIN×MODE cell from ontology hints
+    let mut cell_centroids: HashMap<String, (Vec<f32>, usize)> = HashMap::new();
+    for def in ontology.human_domains.values() {
+        let domain = match def.domain.as_deref() {
+            Some(d) => d,
+            None => continue,
+        };
+        let mode = match def.mode.as_deref() {
+            Some(m) => m,
+            None => continue,
+        };
+        let mut text = def.name.clone();
+        for hint in &def.hints {
+            text.push(' ');
+            text.push_str(hint);
+        }
+        let emb = embedder.embed(&text);
+        let key = format!("{domain}\x00{mode}");
+        let entry = cell_centroids.entry(key).or_insert((vec![0.0f32; emb.len()], 0));
+        for (i, v) in emb.iter().enumerate() {
+            entry.0[i] += v;
+        }
+        entry.1 += 1;
+    }
+    // Average
+    let cell_centroids: HashMap<String, Vec<f32>> = cell_centroids.into_iter()
+        .map(|(k, (sum, count))| {
+            let n = count as f32;
+            (k, sum.into_iter().map(|v| v / n).collect())
+        })
+        .collect();
+
     let state = Arc::new(Mutex::new(AppState {
         config,
         core,
@@ -666,6 +757,7 @@ async fn main() {
         onnx: onnx.clone(),
         rachmaninov: rachmaninov.clone(),
         ingest: ingest.clone(),
+        cell_centroids,
     }));
 
     let state_clone = state.clone();
@@ -727,6 +819,7 @@ async fn main() {
         .route("/api/v1/semiotic/triangle", get(semiotic_triangle_handler))
         .route("/api/v1/semiotic/square", get(greimas_square_handler))
         .route("/api/v1/semiotic/heatmap", get(heatmap_handler))
+        .route("/api/v1/classify", post(classify_handler))
         .route("/api/v1/category/diagram", post(category_diagram_handler))
         .with_state(state);
 

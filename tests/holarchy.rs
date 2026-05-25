@@ -25,7 +25,12 @@ fn test_holonic_graph_add_node() {
 fn test_rayonix_holon_tick() {
     let mut rach = RachmaninovHolon::new();
     rach.tick(&[0.1, 0.2, 0.3]);
+    // First tick initializes current_goal_vector, no directives
     assert!(rach.active_directives.is_empty());
+    
+    // Second tick with drift generates directive
+    rach.tick(&[0.9, 0.8, 0.7]);
+    assert!(!rach.active_directives.is_empty());
 }
 
 #[test]
@@ -34,11 +39,11 @@ fn test_ingest_ring_spawn_and_push() {
     let onnx_tx = holon.get_tx();
     let (graph_tx, graph_rx) = unbounded();
     let ring = IngestRing::spawn(onnx_tx, graph_tx);
-    ring.push(b"hello world".to_vec());
+    ring.push(3, b"hello world".to_vec());
     let received = graph_rx.recv_timeout(std::time::Duration::from_secs(5));
     assert!(received.is_ok(), "IngestRing should forward processed data to graph");
     if let Ok((payload, embedding)) = received {
-        assert!((payload.activation_energy - 1.0).abs() < 1e-6);
+        assert!((payload.activation_energy - 2.0).abs() < 1e-6); // 3 -> 2.0
         assert_eq!(embedding.len(), 32);
     }
 }
@@ -48,13 +53,14 @@ fn test_onnx_holon_spawn_and_ingest() {
     let holon = OnnxHolon::spawn();
     let (reply_tx, reply_rx) = unbounded();
     holon.send(physis::ai::onnx_worker::OnnxRequest::IngestFilter {
+        signal_type: 0,
         raw_buffer: b"test data".to_vec(),
         reply_to: reply_tx,
     });
     let response = reply_rx.recv_timeout(std::time::Duration::from_secs(5));
     assert!(response.is_ok());
     if let Ok(physis::ai::onnx_worker::OnnxResponse::IngestResult { payload, .. }) = response {
-        assert!((payload.activation_energy - 1.0).abs() < 1e-6);
+        assert!((payload.activation_energy - 1.2).abs() < 1e-6); // 0 -> 1.2
     }
 }
 

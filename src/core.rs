@@ -8,11 +8,14 @@ use serde::{Deserialize, Serialize};
 use crate::models::*;
 use crate::trie::DynamicVectorTrie;
 use crate::quantize::ProductQuantizer;
+use crate::graph::{HolonicGraph, NodePayload};
 
 /// Central engine state — coherence graph, certified/isolated branches, dream archive,
 /// and optional PQ-accelerated nearest-neighbour search.
 #[derive(Debug)]
 pub struct PhysisCore {
+    /// Holonic decentralized graph (Phase I).
+    pub holarchy: HolonicGraph,
     /// All coherence nodes keyed by ID.
     pub nodes: HashMap<String, CoherenceNode>,
     /// Dynamic vector trie for semantic search.
@@ -35,6 +38,7 @@ impl PhysisCore {
     /// Create an empty engine core with no nodes, no quantizer.
     pub fn new() -> Self {
         Self {
+            holarchy: HolonicGraph::new(),
             nodes: HashMap::new(),
             wiki: DynamicVectorTrie::new(),
             certified_branches: vec![],
@@ -107,6 +111,37 @@ impl PhysisCore {
 
         if let Some(node) = self.nodes.get_mut(node_id) {
             node.coherence_score = avg.max(0.0);
+        }
+    }
+
+    /// High-level holarchy orchestration.
+    pub fn tick_holarchy(
+        &mut self,
+        onnx: &crate::ai::onnx_worker::OnnxHolon,
+        rachmaninov: &mut crate::rachmaninov::RachmaninovHolon
+    ) {
+        // 1. Dreaming/Pruning
+        self.holarchy.dream_cycle(0.85);
+
+        // 2. GNN Context Extraction
+        let (reply_tx, reply_rx) = crossbeam_channel::unbounded();
+        
+        let mut nodes_for_gnn = Vec::new();
+        for (key, payload) in self.holarchy.nodes.iter() {
+            if let Some(emb) = self.holarchy.embeddings.get(key) {
+                nodes_for_gnn.push((crate::graph::RawNodeKey::from(key).data, emb.clone(), *payload));
+            }
+        }
+        
+        onnx.send(crate::ai::onnx_worker::OnnxRequest::GnnContext {
+            nodes: nodes_for_gnn,
+            edges: self.holarchy.edges.clone(),
+            reply_to: reply_tx,
+        });
+
+        if let Ok(crate::ai::onnx_worker::OnnxResponse::GnnResult { context_vector }) = reply_rx.recv() {
+            // 3. Feed to Rachmaninov
+            rachmaninov.tick(&context_vector);
         }
     }
 

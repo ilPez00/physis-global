@@ -80,37 +80,27 @@ impl VectorEmbed for OnnxEmbedder {
             None => return fallback_embed(text, self.dim),
         };
 
-        let mut session_guard = self.session.lock().unwrap();
-        let session = match session_guard.as_mut() {
-            Some(s) => s,
-            None => return fallback_embed(text, self.dim),
-        };
-
         let encoding = match tokenizer.encode(text, true) {
             Ok(e) => e,
             Err(_) => return fallback_embed(text, self.dim),
         };
 
         let actual_len = encoding.len().min(self.max_length);
-        let ids: Vec<i64> = encoding
-            .get_ids()
-            .iter()
-            .take(self.max_length)
-            .map(|&v| v as i64)
-            .collect();
-        let type_ids: Vec<i64> = encoding
-            .get_type_ids()
-            .iter()
-            .take(self.max_length)
-            .map(|&v| v as i64)
-            .collect();
+        let mut ids: Vec<i64> = encoding
+            .get_ids().iter().take(self.max_length)
+            .map(|&v| v as i64).collect();
+        ids.resize(self.max_length, 0i64);
+        let mut type_ids: Vec<i64> = encoding
+            .get_type_ids().iter().take(self.max_length)
+            .map(|&v| v as i64).collect();
+        type_ids.resize(self.max_length, 0i64);
         let mask: Vec<i64> = (0..self.max_length)
-            .map(|i| if i < actual_len { 1i64 } else { 0i64 })
-            .collect();
+            .map(|i| if i < actual_len { 1i64 } else { 0i64 }).collect();
 
-        let input_ids = Tensor::<i64>::from_array((&[1, self.max_length][..], ids)).ok();
-        let attn_mask = Tensor::<i64>::from_array((&[1, self.max_length][..], mask)).ok();
-        let tok_types = Tensor::<i64>::from_array((&[1, self.max_length][..], type_ids)).ok();
+        let shape = vec![1i64, self.max_length as i64];
+        let input_ids = Tensor::<i64>::from_array((shape.clone(), ids)).ok();
+        let attn_mask = Tensor::<i64>::from_array((shape.clone(), mask)).ok();
+        let tok_types = Tensor::<i64>::from_array((shape, type_ids)).ok();
 
         let (ids_t, mask_t, types_t) = match (input_ids, attn_mask, tok_types) {
             (Some(a), Some(b), Some(c)) => (a, b, c),
@@ -123,7 +113,12 @@ impl VectorEmbed for OnnxEmbedder {
             ("token_type_ids", types_t.into()),
         ];
 
-        let mut s = session;
+        let mut session_guard = self.session.lock().unwrap();
+        let s = match session_guard.as_mut() {
+            Some(s) => s,
+            None => return fallback_embed(text, self.dim),
+        };
+
         let outputs = match s.run(inputs) {
             Ok(o) => o,
             Err(_) => return fallback_embed(text, self.dim),
@@ -138,7 +133,6 @@ impl VectorEmbed for OnnxEmbedder {
             None => return fallback_embed(text, self.dim),
         };
 
-        // Downcast DynValue -> DynTensor -> extract array
         let tensor_ref = match hidden.downcast_ref::<DynTensorValueType>() {
             Ok(t) => t,
             Err(_) => return fallback_embed(text, self.dim),
@@ -152,8 +146,6 @@ impl VectorEmbed for OnnxEmbedder {
         let shape = view.shape();
         let tokens = if shape.len() >= 2 { shape[1] } else { return fallback_embed(text, self.dim); };
         let features = if shape.len() >= 3 { shape[2] } else { self.dim };
-        let stride_t = if shape.len() >= 3 { shape[2] } else { 1 };
-        let stride_b = tokens * stride_t;
         let limit = tokens.min(actual_len);
 
         let mut pooled = vec![0.0f32; self.dim];
@@ -161,7 +153,7 @@ impl VectorEmbed for OnnxEmbedder {
         for t in 0..limit {
             count += 1;
             for d in 0..features.min(self.dim) {
-                pooled[d] += view[stride_b * 0 + t * stride_t + d];
+                pooled[d] += view[[0, t, d]];
             }
         }
 

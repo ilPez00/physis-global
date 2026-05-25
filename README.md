@@ -169,6 +169,15 @@ Le istanze di Physis comunicano tramite connessioni MCP asincrone:
 | `mcp` | MCP server per integrazione strumenti esterni e comunicazione Aura↔Praxis |
 | `linguistic` | Middleware di routing linguistico — Wenyan / Pirahã / Sanskrit |
 | `cli` | Interfaccia CLI via clap |
+| `graph` | Holarchic graph engine — `DenseSlotMap`, `NodePayload`, `Edge`, `MmappedStorage`, ONNX worker integration |
+| `rachmaninov` | PDCA directive engine — `Focus`/`Expand`/`Prune`/`Synthesize`, state-vs-goal tick cycle |
+| `sensory` | `SensorPayload` bridge — raw real-world input (audio, network) → graph node space |
+| `gantt` | `GanttTask` scheduler — start/end, dependencies, `RawNodeKey` causal integration |
+| `storage` | Zero-copy memory-mapped `MmappedStorage` for Pod types |
+| `quantize` | Product quantizer — f32 vectors → byte codes, M centroids per sub-vector |
+| `reconstruct` | Nearest-neighbor reconstruction and LLM-assisted interpretation |
+| `embed` | `VectorEmbed` trait + `RandomProjectionEmbedder` (deterministic) + `OnnxEmbedder` (MiniLM) |
+| `ai` | Provider cascade (OpenAI/Anthropic), tool-using agent loop, episodic memory, ONNX worker |
 
 ## API Principale
 
@@ -243,9 +252,19 @@ physis serve                   # Avvia server MCP (feature: mcp)
 Ontologie predefinite: `config/praxis_ontology.json` (umana, 14+ domini) e
 `config/machine_ontology.json` (macchina, 50+ domini).
 
+## Holarchy — Real-time Graph Engine
+
+Physis now includes a **holarchic graph engine** for real-time causal processing:
+
+- **Graph** (`graph.rs`) — `DenseSlotMap<NodeKey, NodePayload>` with zero-copy `Pod` types, edges with semantic weights, `MmappedStorage` for persistence. New nodes/edges flow through an ONNX worker thread for async embedding enrichment.
+- **Rachmaninov Holon** (`rachmaninov.rs`) — PDCA-driven directive engine. `tick(state_vector)` compares current state vs goal vector, emits `Focus`, `Expand`, `Prune`, or `Synthesize` directives when coherence drifts past threshold.
+- **Sensory Pipeline** (`sensory.rs`) — Packed binary `SensorPayload` structs (timestamp + f32x4 vector) bridging real-world input to graph node space.
+- **ONNX Worker** (`ai/onnx_worker.rs`) — Background thread pool processing embedding requests via `crossbeam_channel`. Non-blocking from the web server.
+- **Gantt Scheduling** (`gantt.rs`) — `GanttTask` with start/end, dependencies, `RawNodeKey` integration for critical path analysis.
+
 ## Semiotic Grid & Ontology Expansion
 
-Physis now ships **9 ontologies** (511 domain entries) mapped onto a **5-domain × 6-mode semiotic grid**:
+Physis ships **9 ontologies** (511 domain entries) mapped onto a **5-domain × 6-mode semiotic grid**:
 
 | Ontology | Kind | Entries | Coverage |
 |----------|------|---------|----------|
@@ -271,6 +290,18 @@ Each entry maps to one of 30 grid cells: **5 domains** (HEAL, CONSTRUCT, FABRICA
 | `/api/v1/semiotic/square` | GET | Greimas semiotic square (Mermaid) |
 | `/api/v1/semiotic/heatmap` | GET | Activation heatmap table + matrix |
 | `/api/v1/category/diagram` | POST | Custom category diagram (objects + morphisms) |
+| `/api/v1/classify` | POST | Embed query text → classify against 22 populated DOMAIN×MODE centroids. Returns sorted `{domain, mode, score, entries}[]` |
+
+### Query Classification
+
+```bash
+curl -X POST http://127.0.0.1:19876/api/v1/classify \
+  -H "Content-Type: application/json" \
+  -d '{"text":"a serene landscape painting with soft brush strokes"}'
+# → top: FABRICATE×CREATE (0.89) — Visual Arts, Storytelling, Music & Performance
+```
+
+At startup, all 511 ontology entries are embedded (name + hints concatenated) and averaged per DOMAIN×MODE cell. At query time, the same embedder scores input text against all centroids via cosine similarity.
 
 ### ONNX MiniLM
 

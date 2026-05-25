@@ -47,6 +47,7 @@ pub struct Edge {
     pub semantic_type: u32,
 }
 
+#[derive(Debug)]
 pub struct HolonicGraph {
     pub nodes: DenseSlotMap<NodeKey, NodePayload>,
     pub edges: Vec<Edge>,
@@ -66,6 +67,35 @@ impl HolonicGraph {
         let key = self.nodes.insert(payload);
         self.embeddings.insert_with_key(|_| embedding);
         key
+    }
+
+    /// Phase IV: Structural Dreaming & Pruning.
+    /// Purges transient edges and decays activation energy.
+    pub fn dream_cycle(&mut self, confidence_threshold: f32) {
+        // 1. Prune edges below threshold
+        self.edges.retain(|e| e.weight > confidence_threshold);
+
+        // 2. Decay activation energy and apply prune flags
+        for (key, payload) in self.nodes.iter_mut() {
+            payload.activation_energy *= 0.95; // 5% decay per cycle
+            if payload.activation_energy < 0.1 {
+                payload.prune_flag = 1;
+            }
+        }
+
+        // 3. Physical purge of flagged nodes
+        let to_remove: Vec<NodeKey> = self.nodes.iter()
+            .filter(|(_, p)| p.prune_flag == 1)
+            .map(|(k, _)| k)
+            .collect();
+
+        for key in to_remove {
+            self.nodes.remove(key);
+            self.embeddings.remove(key);
+            // Remove associated edges
+            let raw_key = RawNodeKey::from(key);
+            self.edges.retain(|e| e.source.data != raw_key.data && e.target.data != raw_key.data);
+        }
     }
 
     pub fn save_to_mmap(&self, storage: &mut MmappedStorage) -> anyhow::Result<()> {
@@ -102,20 +132,26 @@ impl<'a> MmappedGraph<'a> {
     }
 }
 
+pub struct IngestMessage {
+    pub signal_type: u8,
+    pub payload: Vec<u8>,
+}
+
 /// The Ingest Holon entry point.
 pub struct IngestRing {
-    tx: Sender<Vec<u8>>,
+    tx: Sender<IngestMessage>,
 }
 
 impl IngestRing {
     pub fn spawn(onnx_tx: Sender<OnnxRequest>, graph_tx: Sender<(NodePayload, Vec<f32>)>) -> Self {
-        let (tx, rx) = unbounded::<Vec<u8>>();
+        let (tx, rx) = unbounded::<IngestMessage>();
         
         std::thread::spawn(move || {
             let (reply_tx, reply_rx) = unbounded::<OnnxResponse>();
-            while let Ok(buffer) = rx.recv() {
+            while let Ok(msg) = rx.recv() {
                 let _ = onnx_tx.send(OnnxRequest::IngestFilter {
-                    raw_buffer: buffer,
+                    signal_type: msg.signal_type,
+                    raw_buffer: msg.payload,
                     reply_to: reply_tx.clone(),
                 });
                 
@@ -129,7 +165,7 @@ impl IngestRing {
         Self { tx }
     }
 
-    pub fn push(&self, data: Vec<u8>) {
-        let _ = self.tx.send(data);
+    pub fn push(&self, signal_type: u8, payload: Vec<u8>) {
+        let _ = self.tx.send(IngestMessage { signal_type, payload });
     }
 }

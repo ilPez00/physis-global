@@ -24,14 +24,36 @@ impl RachmaninovHolon {
 
     /// PDCA: Plan-Do-Check-Act
     pub fn tick(&mut self, state_vector: &[f32]) {
+        if state_vector.is_empty() {
+            return;
+        }
+
         // 1. Check: Compare state_vector to current_goal_vector
-        // 2. Act: Adjust internal state
-        // 3. Plan: Generate new directives
-        // 4. Do: (Directives are issued to Physis)
-        
-        // Dummy logic
-        if state_vector.len() > 0 {
-             // Logic to generate directives based on state
+        if self.current_goal_vector.is_empty() {
+            self.current_goal_vector = state_vector.to_vec();
+            return;
+        }
+
+        let similarity = crate::models::cosine_sim(&self.current_goal_vector, state_vector);
+
+        // 2. Act: Adjust internal state based on coherence drift
+        if similarity < 0.7 {
+            log::warn!("Significant ontological drift detected (sim={:.4})", similarity);
+            
+            // 3. Plan: Generate new directives
+            self.active_directives.push(Directive::Synthesize { 
+                nodes: vec![] // Future: identify specific outlier nodes
+            });
+        } else if similarity < 0.9 {
+            // Minor drift: Focus on existing nodes to stabilize
+            self.active_directives.push(Directive::Focus { 
+                node_id: RawNodeKey { data: 0 } // Dummy target
+            });
+        }
+
+        // 4. Do: (Directives are cleared after being processed by PhysisCore in next tick)
+        if self.active_directives.len() > 10 {
+            self.active_directives.drain(..5);
         }
     }
 }
