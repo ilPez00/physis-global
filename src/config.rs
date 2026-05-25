@@ -1,3 +1,6 @@
+//! Configuration loading — builds PhysisConfig and loads ontologies from
+//! built-in JSON, file paths, or raw strings into domain maps.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -11,22 +14,38 @@ static BUILTIN_HUMAN_JSON: &str = include_str!("../config/praxis_ontology.json")
 static BUILTIN_MACHINE_JSON: &str = include_str!("../config/machine_ontology.json");
 static DEFAULT_PHYSIS_DIR: &str = ".physis";
 
+/// Top-level configuration for a Physis engine instance.
+///
+/// Controls data directories, ontology sources, network scanning, dream batching,
+/// and PDCA stagnation detection parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysisConfig {
+    /// Directory for persistent data (hash cache, logs, etc.).
     pub data_dir: PathBuf,
+    /// Ontology sources to load at startup.
     pub ontologies: Vec<OntologySource>,
+    /// Seconds between network scans when watching directories.
     pub network_scan_interval_secs: u64,
+    /// Number of dreams to generate per dream cycle.
     pub dream_batch_size: usize,
+    /// Progress threshold below which a goal is flagged stagnant.
     pub pdca_stagnant_threshold: f32,
+    /// Number of recent PDCA actions to inspect for stagnation.
     pub pdca_stagnant_window: usize,
+    /// Directories to watch for file changes.
     pub watch_dirs: Vec<PathBuf>,
 }
 
+/// Describes a single ontology source: built-in (no path) or file-based.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OntologySource {
+    /// Display name for this ontology.
     pub name: String,
+    /// Filesystem path (None for built-in ontologies).
     pub path: Option<PathBuf>,
+    /// Ontology kind: "human", "machine", or custom.
     pub kind: String,
+    /// Whether this source is loaded at startup.
     pub enabled: bool,
 }
 
@@ -58,14 +77,22 @@ impl Default for PhysisConfig {
     }
 }
 
+/// Loads and resolves ontologies from built-in JSON, file paths, or raw strings.
+///
+/// Maintains three separate domain maps (human, machine, custom) populated
+/// by `load_all` based on `PhysisConfig.ontologies`.
 #[derive(Debug, Clone)]
 pub struct OntologyLoader {
+    /// Human domain definitions (praxis ontology).
     pub human_domains: HashMap<String, DomainDef>,
+    /// Machine domain definitions (machine ontology).
     pub machine_domains: HashMap<String, DomainDef>,
+    /// Custom domain definitions loaded from file paths.
     pub custom_domains: HashMap<String, DomainDef>,
 }
 
 impl OntologyLoader {
+    /// Create an empty ontology loader.
     pub fn new() -> Self {
         Self {
             human_domains: HashMap::new(),
@@ -74,24 +101,28 @@ impl OntologyLoader {
         }
     }
 
+    /// Load the built-in human ontology from `config/praxis_ontology.json`.
     pub fn load_builtin_human() -> HashMap<String, DomainDef> {
         let entries: OntologyConfig = serde_json::from_str(BUILTIN_HUMAN_JSON)
             .expect("Built-in human ontology is valid JSON");
         Self::entries_to_map(&entries.domains)
     }
 
+    /// Load the built-in machine ontology from `config/machine_ontology.json`.
     pub fn load_builtin_machine() -> HashMap<String, DomainDef> {
         let entries: OntologyConfig = serde_json::from_str(BUILTIN_MACHINE_JSON)
             .expect("Built-in machine ontology is valid JSON");
         Self::entries_to_map(&entries.domains)
     }
 
+    /// Load domain definitions from a JSON file on disk.
     pub fn load_from_path(path: &Path) -> anyhow::Result<HashMap<String, DomainDef>> {
         let contents = std::fs::read_to_string(path)?;
         let config: OntologyConfig = serde_json::from_str(&contents)?;
         Ok(Self::entries_to_map(&config.domains))
     }
 
+    /// Parse domain definitions from a raw JSON string.
     pub fn load_from_str(json: &str) -> anyhow::Result<HashMap<String, DomainDef>> {
         let config: OntologyConfig = serde_json::from_str(json)?;
         Ok(Self::entries_to_map(&config.domains))
@@ -113,6 +144,8 @@ impl OntologyLoader {
         map
     }
 
+    /// Load all enabled ontologies from a `PhysisConfig`, populating human, machine,
+    /// and custom domain maps. Built-in ontologies are loaded when no path is given.
     pub fn load_all(config: &PhysisConfig) -> Self {
         let mut loader = Self::new();
 
@@ -150,10 +183,12 @@ impl OntologyLoader {
         loader
     }
 
+    /// Resolve a goal name to a human domain definition. Currently returns the first available.
     pub fn resolve_domain(&self, _goal_name: &str) -> Option<&DomainDef> {
         self.human_domains.values().next()
     }
 
+    /// Format a goal as a human-readable string with domain context and progress.
     pub fn enrich_goal(&self, goal: &Goal) -> String {
         let _ = goal;
         let def = self.human_domains.values().next();

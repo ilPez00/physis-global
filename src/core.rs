@@ -1,3 +1,6 @@
+//! Central engine state — coherence graph nodes, certified/isolated branches,
+//! dream archive, and PQ-accelerated nearest-neighbour search.
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -6,20 +9,30 @@ use crate::models::*;
 use crate::trie::DynamicVectorTrie;
 use crate::quantize::ProductQuantizer;
 
+/// Central engine state — coherence graph, certified/isolated branches, dream archive,
+/// and optional PQ-accelerated nearest-neighbour search.
 #[derive(Debug)]
 pub struct PhysisCore {
+    /// All coherence nodes keyed by ID.
     pub nodes: HashMap<String, CoherenceNode>,
+    /// Dynamic vector trie for semantic search.
     pub wiki: DynamicVectorTrie,
+    /// Branches that have been certified as coherent clusters.
     pub certified_branches: Vec<CertifiedBranch>,
+    /// Branches flagged as low-coherence outliers.
     pub isolated_branches: Vec<IsolatedBranch>,
+    /// Archive of dream evaluation results.
     pub dream_archive: Vec<DreamResult>,
+    /// Optional product quantizer for ANN search.
     pub quantizer: Option<ProductQuantizer>,
-    /// PQ-encoded nodes: node_id → (node_id, codes)
+    /// PQ-encoded nodes: node_id → codes.
     pub encoded_nodes: Vec<(String, Vec<u8>)>,
+    /// Dimension used when training the quantizer.
     pub quantizer_dim: usize,
 }
 
 impl PhysisCore {
+    /// Create an empty engine core with no nodes, no quantizer.
     pub fn new() -> Self {
         Self {
             nodes: HashMap::new(),
@@ -33,6 +46,7 @@ impl PhysisCore {
         }
     }
 
+    /// Create an engine core pre-populated with an existing wiki trie.
     pub fn with_wiki(wiki: DynamicVectorTrie) -> Self {
         let mut g = Self::new();
         g.wiki = wiki;
@@ -297,11 +311,15 @@ impl Default for PhysisCore {
 }
 
 #[derive(Debug, Clone)]
+/// Result of a consistency check: no conflict, or a constructive refutation.
 pub enum ConsistencyResult {
+    /// No conflicting nodes found above the threshold.
     Clean,
+    /// A conflict was detected with a suggested refutation.
     Conflict(ConstructiveRefutation),
 }
 
+/// Snapshot of coherence health across the node graph, broken into bands.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoherenceSnapshot {
     pub total_nodes: usize,

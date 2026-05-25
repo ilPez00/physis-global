@@ -1,18 +1,30 @@
+//! ONNX MiniLM embedder — production-grade semantic embeddings via the `ort`
+//! runtime. Falls back to deterministic random projection when the model is
+//! unavailable. Enabled with the `embed-onnx` feature.
+
 use super::VectorEmbed;
 use std::path::Path;
 use std::sync::Mutex;
 
 use ort::value::{DynTensorValueType, Tensor};
 
+/// Embedder that loads an ONNX MiniLM model for semantic embeddings.
+///
+/// Falls back to deterministic random projection when the model or tokenizer
+/// is not available at the given path.
 pub struct OnnxEmbedder {
     dim: usize,
     session: Mutex<Option<ort::session::Session>>,
     tokenizer: Option<tokenizers::Tokenizer>,
+    /// Directory path where model.onnx and tokenizer.json are stored.
     pub model_path: String,
     max_length: usize,
 }
 
 impl OnnxEmbedder {
+    /// Create a new ONNX embedder. If `model_dir` does not contain
+    /// `model.onnx` and `tokenizer.json`, all embeddings fall back to
+    /// deterministic random projection.
     pub fn new(model_dir: &str) -> Self {
         let dim = 384;
         let model_path = Path::new(model_dir).join("model.onnx");
@@ -41,6 +53,7 @@ impl OnnxEmbedder {
         }
     }
 
+    /// True when both the ONNX session and tokenizer are loaded successfully.
     pub fn is_available(&self) -> bool {
         self.session.lock().unwrap().is_some() && self.tokenizer.is_some()
     }

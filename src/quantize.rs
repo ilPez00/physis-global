@@ -1,12 +1,13 @@
-/// Product Quantizer — compresses f32 vectors to compact byte codes.
-/// Splits D-dim vector into M sub-vectors, each quantized to K centroids.
-/// Compression ratio: D * 4 → M bytes (e.g., 384 * 4 = 1536 → 8 bytes).
+//! Product quantizer for compressed vector storage — f32 → byte codes.
+//! Splits D-dim vector into M sub-vectors, each quantized to K centroids.
+//! Compression ratio: D * 4 → M bytes (e.g., 384 * 4 = 1536 → 8 bytes).
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const DEFAULT_M: usize = 8;
 const DEFAULT_K: usize = 256;
 
+/// Compresses f32 vectors into compact byte codes via product quantization.
 #[derive(Debug, Clone)]
 pub struct ProductQuantizer {
     pub m: usize,        // number of sub-vectors
@@ -21,6 +22,7 @@ pub struct ProductQuantizer {
 }
 
 impl ProductQuantizer {
+    /// Creates a PQ with defaults (M=8, K=256) for the given vector dimension.
     pub fn new(dim: usize) -> Self {
         let m = DEFAULT_M;
         let k = DEFAULT_K;
@@ -38,6 +40,7 @@ impl ProductQuantizer {
         }
     }
 
+    /// Creates a PQ with custom M sub-vectors and K centroids per subspace.
     pub fn with_params(dim: usize, m: usize, k: usize) -> Self {
         let sub_dim = (dim + m - 1) / m;
         let codebooks = vec![vec![vec![0.0f32; sub_dim]; k]; m];
@@ -188,10 +191,12 @@ impl ProductQuantizer {
         results
     }
 
+    /// Returns true after at least one vector has been trained.
     pub fn is_trained(&self) -> bool {
         self.trained
     }
 
+    /// Returns the compressed size in bytes, equal to the number of sub-vectors M.
     pub fn compressed_size(&self) -> usize {
         self.m
     }

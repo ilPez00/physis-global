@@ -1,3 +1,6 @@
+//! CLI application orchestrator — parses subcommands via clap and dispatches
+//! to PhysisApp methods for scanning, querying, dreaming, and evaluating.
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -67,16 +70,24 @@ pub enum Commands {
     Config,
 }
 
+/// Top-level application state: config, ontology, mapper, PDCA actor, dream engine, goals.
 pub struct PhysisApp {
+    /// Engine configuration.
     pub config: PhysisConfig,
+    /// Loaded ontology domains.
     pub ontology: OntologyLoader,
+    /// Ontological mapper with trie and vector search.
     pub mapper: OntologyMapper,
+    /// PDCA cycle orchestrator.
     pub actor: PDCActor,
+    /// Dream generation engine.
     pub dreams: DreamEngine,
+    /// Current vector-space goals.
     pub goals: Vec<Goal>,
 }
 
 impl PhysisApp {
+    /// Build a new PhysisApp from config — loads ontology, creates mapper, actor, dream engine.
     pub fn new(config: PhysisConfig) -> Self {
         let ontology = OntologyLoader::load_all(&config);
         let mapper = OntologyMapper::new(ontology.clone());
@@ -93,6 +104,7 @@ impl PhysisApp {
         }
     }
 
+    /// Scan a directory and return ontology output in the requested format (wiki/json/mermaid).
     pub fn run_scan(&mut self, dir: &std::path::Path, format: &str) -> String {
         let goals = self.mapper.map_filesystem(dir, None);
         self.goals = goals;
@@ -105,6 +117,7 @@ impl PhysisApp {
         }
     }
 
+    /// Search the ontology trie for paths matching the query tokens.
     pub fn run_query(&self, query: &str, max_results: usize) -> Vec<Vec<String>> {
         let words: Vec<&str> = query.split_whitespace().collect();
         let tids: Vec<u32> = words
@@ -117,14 +130,17 @@ impl PhysisApp {
         self.mapper.trie.prefix_search(&tids, 2, max_results)
     }
 
+    /// Generate `count` dreams from the current goal set.
     pub fn run_dream(&mut self, count: usize) -> Vec<crate::models::Dream> {
         self.dreams.generate_dreams(&self.goals, count)
     }
 
+    /// Grade a dream by ID. Returns false if no dream with that ID exists.
     pub fn run_evaluate(&mut self, id: &str, grade: Score) -> bool {
         self.dreams.evaluate_dream(id, grade)
     }
 
+    /// Deep AI-powered scan — sends file content to LLM for ontological map extraction.
     pub async fn run_deep_scan(&mut self, dir: &std::path::Path) -> anyhow::Result<String> {
         use crate::ai::provider::ProviderCascade;
         use crate::ai::agent::{run_agent, AgentConfig};
@@ -196,6 +212,7 @@ No other text."#.into(),
         Ok(serde_json::to_string_pretty(&global_map)?)
     }
 
+    /// Watch directories for file changes using hash-cache diffing.
     pub fn run_watch(&mut self, dirs: Vec<PathBuf>) -> String {
         let cache_path = self.config.data_dir.join("hash_cache.json");
         let scanner = NetworkScanner::new(dirs.clone(), cache_path, self.config.network_scan_interval_secs);
@@ -208,6 +225,7 @@ No other text."#.into(),
         changes.join("\n")
     }
 
+    /// Print trie statistics and PDCA metrics.
     pub fn run_stats(&self) -> String {
         let stats = self.mapper.stats();
         let mut out = String::new();

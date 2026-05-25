@@ -1,3 +1,4 @@
+//! Maps filesystem trees into ontological trie structures with vector embeddings.
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -7,6 +8,7 @@ use crate::models::Goal;
 use crate::scanner::{self, FileInfo};
 use crate::trie::DynamicVectorTrie;
 
+/// Maps filesystem paths and goals into a dynamic vector trie for semantic search.
 #[derive(Debug, Clone)]
 pub struct OntologyMapper {
     pub ontology: OntologyLoader,
@@ -14,6 +16,7 @@ pub struct OntologyMapper {
 }
 
 impl OntologyMapper {
+    /// Creates a new mapper with the given ontology definition.
     pub fn new(ontology: OntologyLoader) -> Self {
         Self {
             ontology,
@@ -21,6 +24,7 @@ impl OntologyMapper {
         }
     }
 
+    /// Scans a directory and inserts file paths as tokens into the trie, returning Goal vectors.
     pub fn map_filesystem(
         &mut self,
         root_dir: &Path,
@@ -49,6 +53,7 @@ impl OntologyMapper {
         goals
     }
 
+    /// Inserts goal embeddings into the trie as tokenized paths.
     pub fn map_goals_to_trie(&mut self, goals: &[Goal]) {
         for goal in goals {
             let embedding_str: String = goal.embedding.iter()
@@ -87,6 +92,7 @@ impl OntologyMapper {
         lang_domain.to_string()
     }
 
+    /// Searches the trie for paths matching a whitespace-delimited query string.
     pub fn query(&self, query: &str) -> Vec<Vec<String>> {
         let words: Vec<&str> = query.split_whitespace().collect();
         let tids: Vec<u32> = words
@@ -99,6 +105,7 @@ impl OntologyMapper {
         self.trie.prefix_search(&tids, 2, 10)
     }
 
+    /// Returns trie statistics plus domain counts from the ontology.
     pub fn stats(&self) -> HashMap<String, usize> {
         let mut s = self.trie.stats();
         s.insert("human_domains".to_string(), self.ontology.human_domains.len());

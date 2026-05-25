@@ -1,17 +1,24 @@
+//! Linguistic lenses — Wenyan (kanji compression), Piraha (filler-stripping), Sanskrit (poetic expansion).
+
 pub mod piraha;
 pub mod sanskrit;
 pub mod wenyan;
 
 use std::collections::HashMap;
 
+/// Which linguistic transformation to apply to text data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinguisticLense {
+    /// Poetic expansion (Sanskrit mode).
     Sanskrit,
+    /// Filler-stripping minimalism (Piraha mode).
     Piraha,
+    /// Kanji-heavy compression (Wenyan mode).
     Wenyan,
 }
 
 impl LinguisticLense {
+    /// Return the uppercase string label for this lense variant.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Sanskrit => "SANSKRIT",
@@ -21,14 +28,19 @@ impl LinguisticLense {
     }
 }
 
+/// Routes text through one or all linguistic lenses.
 #[derive(Debug, Clone)]
 pub struct LinguisticRouter {
+    /// Wenyan filter (kanji compression).
     pub wenyan: wenyan::WenyanFilter,
+    /// Piraha filter (filler stripping).
     pub piraha: piraha::PirahaFilter,
+    /// Sanskrit engine (poetic expansion).
     pub sanskrit: sanskrit::SanskritEngine,
 }
 
 impl LinguisticRouter {
+    /// Create a new router with default filters for all three lenses.
     pub fn new() -> Self {
         Self {
             wenyan: wenyan::WenyanFilter::new(),
@@ -37,6 +49,7 @@ impl LinguisticRouter {
         }
     }
 
+    /// Transform `raw_data` through the specified lense.
     pub fn route(&self, raw_data: &str, lense: LinguisticLense) -> String {
         match lense {
             LinguisticLense::Piraha => self.piraha.filter(raw_data),
@@ -45,6 +58,7 @@ impl LinguisticRouter {
         }
     }
 
+    /// Apply all three lenses and return a map from lense to result.
     pub fn route_all(&self, raw_data: &str) -> HashMap<LinguisticLense, String> {
         let mut results = HashMap::new();
         for lense in &[LinguisticLense::Wenyan, LinguisticLense::Piraha, LinguisticLense::Sanskrit] {

@@ -1,3 +1,4 @@
+//! Vector-space nearest-neighbor reconstruction and LLM-assisted interpretation.
 use std::cmp::Ordering;
 
 use serde::Serialize;
@@ -6,6 +7,7 @@ use crate::core::PhysisCore;
 use crate::embed::VectorEmbed;
 use crate::models::{cosine_sim, Goal};
 
+/// A single vector-space neighbor with cosine similarity and coherence score.
 #[derive(Debug, Clone, Serialize)]
 pub struct Neighbor {
     pub id: String,
@@ -14,6 +16,7 @@ pub struct Neighbor {
     pub coherence_score: f32,
 }
 
+/// The result of a nearest-neighbor query: query embedding plus ranked neighbors.
 #[derive(Debug, Clone, Serialize)]
 pub struct Reconstruction {
     pub query_embedding: Vec<f32>,
@@ -22,12 +25,14 @@ pub struct Reconstruction {
 }
 
 impl Reconstruction {
+    /// Returns the first N neighbors (or fewer if insufficient results).
     pub fn top(&self, n: usize) -> &[Neighbor] {
         let end = self.neighbors.len().min(n);
         &self.neighbors[..end]
     }
 }
 
+/// Finds the k nearest neighbors to a query vector using PQ-accelerated or brute-force search.
 pub fn find_neighbors(
     query: &[f32],
     core: &PhysisCore,
@@ -71,6 +76,7 @@ pub fn find_neighbors(
     scored
 }
 
+/// Returns the k closest goals to a query vector, sorted by cosine similarity.
 pub fn find_nearest_goals(
     query: &[f32],
     goals: &[Goal],
@@ -96,6 +102,7 @@ pub fn find_nearest_goals(
     scored
 }
 
+/// Embeds a text query and finds nearest neighbors from the core index.
 pub fn reconstruct(
     input: &str,
     embedder: &dyn VectorEmbed,
@@ -112,6 +119,7 @@ pub fn reconstruct(
     }
 }
 
+/// Embeds a text query and finds nearest neighbors from a slice of Goals.
 pub fn reconstruct_from_goals(
     input: &str,
     embedder: &dyn VectorEmbed,
@@ -128,6 +136,7 @@ pub fn reconstruct_from_goals(
     }
 }
 
+/// Embeds a query, finds neighbors, and uses an LLM cascade to produce a semantic summary.
 pub async fn reconstruct_with_llm(
     input: &str,
     embedder: &dyn VectorEmbed,

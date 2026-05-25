@@ -1,14 +1,21 @@
+//! Stochastic dream generation — interpolate, extrapolate, and mutate goal
+//! vectors to produce novel candidate embeddings for evaluation.
+
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::models::{cosine_sim, Dream, Goal};
 
+/// Stochastic dream engine — generates novel candidate embeddings by interpolating,
+/// extrapolating, and mutating existing goal vectors.
 pub struct DreamEngine {
+    /// All generated dreams (kept for grading and novelty scoring).
     pub dreams: Vec<Dream>,
     rng: StdRng,
 }
 
 impl DreamEngine {
+    /// Create a new dream engine with an entropy-seeded RNG.
     pub fn new() -> Self {
         Self {
             dreams: Vec::new(),
@@ -16,6 +23,8 @@ impl DreamEngine {
         }
     }
 
+    /// Generate `batch_size` dreams from the given goal set using random interpolation,
+    /// extrapolation, and mutation. Returns only the newly generated dreams.
     pub fn generate_dreams(&mut self, goals: &[Goal], batch_size: usize) -> Vec<Dream> {
         if goals.is_empty() || batch_size == 0 {
             return vec![];
@@ -86,6 +95,7 @@ impl DreamEngine {
         Dream::new(g.embedding.clone(), embedding)
     }
 
+    /// Grade a dream by ID. Returns false if no dream with that ID exists.
     pub fn evaluate_dream(&mut self, dream_id: &str, grade: f32) -> bool {
         if let Some(dream) = self.dreams.iter_mut().find(|d| d.id == dream_id) {
             dream.grade = Some(grade);
@@ -95,10 +105,12 @@ impl DreamEngine {
         }
     }
 
+    /// Compute novelty score: 1.0 - cosine similarity between source and embedding.
     pub fn novelty(&self, dream: &Dream) -> f32 {
         1.0 - cosine_sim(&dream.source, &dream.embedding)
     }
 
+    /// Return all dreams that have not yet been graded.
     pub fn ungraded_dreams(&self) -> Vec<&Dream> {
         self.dreams.iter().filter(|d| d.grade.is_none()).collect()
     }

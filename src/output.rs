@@ -1,8 +1,10 @@
+//! Output formatters — Wiki-style reports, JSON graph, Mermaid mindmap/flowchart, domain reports.
 use std::collections::HashMap;
 
 use crate::models::{DomainDef, Goal};
 use crate::trie::DynamicVectorTrie;
 
+/// Formats goals and trie structure into a Wiki-style markdown report.
 pub fn format_wiki(trie: &DynamicVectorTrie, goals: &[Goal], title: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", title));
@@ -32,11 +34,13 @@ pub fn format_wiki(trie: &DynamicVectorTrie, goals: &[Goal], title: &str) -> Str
     out
 }
 
+/// Exports the trie as a JSON graph with entities and relations.
 pub fn format_json_graph(trie: &DynamicVectorTrie) -> String {
     let json = trie.export_json();
     serde_json::to_string_pretty(&json).unwrap_or_default()
 }
 
+/// Renders the trie as a Mermaid mindmap diagram.
 pub fn format_mermaid_mindmap(trie: &DynamicVectorTrie, title: &str) -> String {
     let mut out = String::new();
     out.push_str("mindmap\n");
@@ -67,6 +71,7 @@ pub fn format_mermaid_mindmap(trie: &DynamicVectorTrie, title: &str) -> String {
     out
 }
 
+/// Renders the trie as a Mermaid flowchart with parent-child edges.
 pub fn format_mermaid_flowchart(trie: &DynamicVectorTrie) -> String {
     let mut out = String::new();
     out.push_str("flowchart TD\n");
@@ -92,6 +97,7 @@ pub fn format_mermaid_flowchart(trie: &DynamicVectorTrie) -> String {
     out
 }
 
+/// Produces a per-domain report with goal count, average grade, and category metadata.
 pub fn format_domain_report(
     goals: &[Goal],
     domains: &HashMap<String, DomainDef>,

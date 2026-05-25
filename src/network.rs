@@ -1,8 +1,10 @@
+//! Filesystem watching and network scanning — hash-cache-based change detection.
 use std::path::PathBuf;
 
 use crate::scanner::{compute_diff, load_hash_cache, save_hash_cache, scan_project, ScanDiff};
 use crate::trie::DynamicVectorTrie;
 
+/// Events emitted by the network scanner: file changes, agent discovery/loss, or errors.
 pub enum NetworkEvent {
     FilesChanged(ScanDiff),
     AgentDiscovered(String),
@@ -10,6 +12,7 @@ pub enum NetworkEvent {
     Error(String),
 }
 
+/// Scans watched directories for file changes using a hash cache.
 #[derive(Debug, Clone)]
 pub struct NetworkScanner {
     pub watch_dirs: Vec<PathBuf>,
@@ -19,6 +22,7 @@ pub struct NetworkScanner {
 }
 
 impl NetworkScanner {
+    /// Creates a scanner with directories to watch, a cache file path, and scan interval.
     pub fn new(watch_dirs: Vec<PathBuf>, cache_path: PathBuf, scan_interval_secs: u64) -> Self {
         Self {
             watch_dirs,
@@ -27,6 +31,7 @@ impl NetworkScanner {
         }
     }
 
+    /// Scans all watched directories and returns diffs against the cached state.
     pub fn scan_all(&self) -> Vec<ScanDiff> {
         let mut results = Vec::new();
         let cache = load_hash_cache(&self.cache_path);
@@ -43,6 +48,7 @@ impl NetworkScanner {
         results
     }
 
+    /// Applies scan diffs to the hash cache and persists to disk.
     pub fn update_cache(&self, diffs: &[ScanDiff]) {
         let mut cache = load_hash_cache(&self.cache_path);
         for diff in diffs {
@@ -59,6 +65,7 @@ impl NetworkScanner {
         let _ = save_hash_cache(&self.cache_path, &cache);
     }
 
+    /// Inserts new/changed paths into the trie and removes deleted ones.
     pub fn apply_to_trie(&self, trie: &mut DynamicVectorTrie, diffs: &[ScanDiff]) {
         for diff in diffs {
             for f in &diff.new {
@@ -89,6 +96,7 @@ pub mod watcher {
     use notify::{Config, EventKind, RecursiveMode, Watcher};
     use super::NetworkEvent;
 
+    /// Starts a filesystem watcher that polls directories for create/modify/remove events.
     pub fn start_watcher(
         watch_dirs: Vec<PathBuf>,
         _tx: mpsc::Sender<NetworkEvent>,

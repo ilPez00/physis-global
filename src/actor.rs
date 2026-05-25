@@ -1,24 +1,45 @@
+//! PDCA (Plan-Do-Check-Act) cycle orchestrator for driving goals through
+//! iterative state transitions. Tracks experiences, detects stagnation,
+//! and produces plans with measurable progress.
+
 use serde::Serialize;
 
 use crate::models::{cosine_dist, cosine_sim, Experience, Goal, Score};
 
+/// Aggregate statistics from the PDCA cycle.
 #[derive(Debug, Clone, Serialize)]
 pub struct PDCAStats {
+    /// Number of actions executed across all goals.
     pub total_actions: usize,
+    /// Number of goals being tracked.
     pub total_goals: usize,
+    /// Average grade across all experiences.
     pub avg_grade: f64,
+    /// Mean progress across all goals (0.0–1.0).
     pub mean_progress: f64,
+    /// Number of goals that have stalled below the progress threshold.
     pub stagnant_count: usize,
 }
 
+/// Drives the Plan-Do-Check-Act cycle over a set of vector-space goals.
+///
+/// Each action produces an Experience (before/after + delta), stagnation is
+/// detected when recent progress stays below `config_stagnant_threshold`.
 #[derive(Debug)]
 pub struct PDCActor {
+    /// History of all experiences across all goals.
     pub experiences: Vec<Experience>,
+    /// Progress threshold below which a goal is considered stagnant.
     pub config_stagnant_threshold: f32,
+    /// Number of recent actions to evaluate for stagnation.
     pub config_stagnant_window: usize,
 }
 
 impl PDCActor {
+    /// Create a new PDCActor with stagnation detection parameters.
+    ///
+    /// `stagnant_threshold` — progress must stay under this fraction to flag.
+    /// `stagnant_window` — number of recent actions to inspect.
     pub fn new(stagnant_threshold: f32, stagnant_window: usize) -> Self {
         Self {
             experiences: Vec::new(),
@@ -27,6 +48,7 @@ impl PDCActor {
         }
     }
 
+    /// Plan — return goals sorted by priority (lowest progress first, then stagnant).
     pub fn plan<'a>(&self, goals: &'a [Goal]) -> Vec<&'a Goal> {
         let mut sorted: Vec<&Goal> = goals.iter().collect();
         sorted.sort_by(|a, b| {
@@ -36,12 +58,14 @@ impl PDCActor {
         sorted
     }
 
+    /// Do — record a state transition for a goal, returning the new Experience.
     pub fn do_action(&mut self, goal_id: &str, before: Vec<f32>, after: Vec<f32>) -> Experience {
         let exp = Experience::new(goal_id, before, after);
         self.experiences.push(exp.clone());
         exp
     }
 
+    /// Check — assign a grade to an experience by ID. Returns false if not found.
     pub fn check(&mut self, experience_id: &str, grade: Score) -> bool {
         if let Some(exp) = self.experiences.iter_mut().find(|e| e.id == experience_id) {
             exp.grade = grade;
@@ -51,6 +75,7 @@ impl PDCActor {
         }
     }
 
+    /// Act — update goal progress based on recent experience grades and vector deltas.
     pub fn act(&self, experiences: &[Experience], goals: &mut [Goal]) -> Vec<String> {
         let mut adjustments = Vec::new();
 
@@ -79,6 +104,7 @@ impl PDCActor {
         adjustments
     }
 
+    /// Aggregate PDCA statistics: action count, average grade, progress, stagnation.
     pub fn stats(&self, goals: &[Goal]) -> PDCAStats {
         let grades: Vec<Score> = self.experiences.iter().map(|e| e.grade).collect();
         let avg_grade = if grades.is_empty() {
@@ -133,6 +159,7 @@ impl PDCActor {
         stagnant
     }
 
+    /// Returns true when at least one goal is both incomplete and not stagnant.
     pub fn is_working(&self, goals: &[Goal]) -> bool {
         let stagnant = self.detect_stagnant(goals);
         goals.iter().any(|g| g.progress < 1.0 && !stagnant.contains(&g.id))
