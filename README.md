@@ -243,6 +243,47 @@ physis serve                   # Avvia server MCP (feature: mcp)
 Ontologie predefinite: `config/praxis_ontology.json` (umana, 14+ domini) e
 `config/machine_ontology.json` (macchina, 50+ domini).
 
+## Semiotic Grid & Ontology Expansion
+
+Physis now ships **9 ontologies** (511 domain entries) mapped onto a **5-domain × 6-mode semiotic grid**:
+
+| Ontology | Kind | Entries | Coverage |
+|----------|------|---------|----------|
+| `praxis_ontology` | human | 54 | Human activities (body, career, social, finance, etc.) |
+| `machine_ontology` | machine | 84 | CNC, vehicles, sensors, actuators, electronics, etc. |
+| `semiotic_ontology` | semiotic | 44 | Peirce, Saussure, Barthes, Eco, Jakobson, Greimas |
+| `category_ontology` | category | 54 | Category theory — objects, morphisms, functors, monads |
+| `agent_ontology` | agent | 48 | AI cognitive architectures, reasoning, learning paradigms |
+| `natural_ontology` | natural | 56 | Physics, chemistry, biology, astronomy, ecology |
+| `social_ontology` | social | 50 | Sociology, culture, politics, economics, law |
+| `abstract_ontology` | abstract | 56 | Math, logic, computation, systems, linguistics, info |
+| `engineering_ontology` | engineering | 65 | Software, civil, mechanical, electrical, chemical, etc. |
+
+Each entry maps to one of 30 grid cells: **5 domains** (HEAL, CONSTRUCT, FABRICATE, BOND, STUDY) × **6 modes** (LIFT, REST, WALK, WORK, CREATE, LEARN).
+
+### Semiotic API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/ontology/list` | GET | Domain counts per ontology |
+| `/api/v1/semiotic/grid` | GET | 30-cell grid with entries per cell |
+| `/api/v1/semiotic/triangle` | GET | Peircean semiotic triangle (Mermaid) |
+| `/api/v1/semiotic/square` | GET | Greimas semiotic square (Mermaid) |
+| `/api/v1/semiotic/heatmap` | GET | Activation heatmap table + matrix |
+| `/api/v1/category/diagram` | POST | Custom category diagram (objects + morphisms) |
+
+### ONNX MiniLM
+
+For production-grade semantic embeddings (instead of deterministic random projection):
+
+```bash
+pip install optimum onnx
+optimum-cli export sentence-transformers models/sentence-transformers/all-MiniLM-L6-v2
+# Creates models/model.onnx and models/tokenizer.json
+```
+
+Enable with `--features embed-onnx`. Falls back to RP when model files are absent.
+
 ## Build
 
 ```bash

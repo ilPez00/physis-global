@@ -7,11 +7,18 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::models::*;
-use crate::ontology::HUMAN_ONTOLOGY_NAME;
+use crate::ontology::*;
 use crate::ontology_nonhuman::MACHINE_ONTOLOGY_NAME;
 
 static BUILTIN_HUMAN_JSON: &str = include_str!("../config/praxis_ontology.json");
 static BUILTIN_MACHINE_JSON: &str = include_str!("../config/machine_ontology.json");
+static BUILTIN_SEMIOTIC_JSON: &str = include_str!("../config/semiotic_ontology.json");
+static BUILTIN_CATEGORY_JSON: &str = include_str!("../config/category_ontology.json");
+static BUILTIN_AGENT_JSON: &str = include_str!("../config/agent_ontology.json");
+static BUILTIN_NATURAL_JSON: &str = include_str!("../config/natural_ontology.json");
+static BUILTIN_SOCIAL_JSON: &str = include_str!("../config/social_ontology.json");
+static BUILTIN_ABSTRACT_JSON: &str = include_str!("../config/abstract_ontology.json");
+static BUILTIN_ENGINEERING_JSON: &str = include_str!("../config/engineering_ontology.json");
 static DEFAULT_PHYSIS_DIR: &str = ".physis";
 
 /// Controls which linguistic lenses (Wenyan, Piraha, Sanskrit) are active at runtime.
@@ -118,6 +125,48 @@ impl Default for PhysisConfig {
                     kind: "machine".to_string(),
                     enabled: true,
                 },
+                OntologySource {
+                    name: SEMIOTIC_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "semiotic".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: CATEGORY_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "category".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: AGENT_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "agent".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: NATURAL_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "natural".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: SOCIAL_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "social".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: ABSTRACT_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "abstract".to_string(),
+                    enabled: true,
+                },
+                OntologySource {
+                    name: ENGINEERING_ONTOLOGY_NAME.to_string(),
+                    path: None,
+                    kind: "engineering".to_string(),
+                    enabled: true,
+                },
             ],
             network_scan_interval_secs: 60,
             dream_batch_size: 5,
@@ -141,6 +190,20 @@ pub struct OntologyLoader {
     pub human_domains: HashMap<String, DomainDef>,
     /// Machine domain definitions (machine ontology).
     pub machine_domains: HashMap<String, DomainDef>,
+    /// Semiotic domain definitions.
+    pub semiotic_domains: HashMap<String, DomainDef>,
+    /// Category theory domain definitions.
+    pub category_domains: HashMap<String, DomainDef>,
+    /// AI agent domain definitions.
+    pub agent_domains: HashMap<String, DomainDef>,
+    /// Natural world domain definitions.
+    pub natural_domains: HashMap<String, DomainDef>,
+    /// Social domain definitions.
+    pub social_domains: HashMap<String, DomainDef>,
+    /// Abstract domain definitions.
+    pub abstract_domains: HashMap<String, DomainDef>,
+    /// Engineering domain definitions.
+    pub engineering_domains: HashMap<String, DomainDef>,
     /// Custom domain definitions loaded from file paths.
     pub custom_domains: HashMap<String, DomainDef>,
 }
@@ -151,6 +214,13 @@ impl OntologyLoader {
         Self {
             human_domains: HashMap::new(),
             machine_domains: HashMap::new(),
+            semiotic_domains: HashMap::new(),
+            category_domains: HashMap::new(),
+            agent_domains: HashMap::new(),
+            natural_domains: HashMap::new(),
+            social_domains: HashMap::new(),
+            abstract_domains: HashMap::new(),
+            engineering_domains: HashMap::new(),
             custom_domains: HashMap::new(),
         }
     }
@@ -166,6 +236,55 @@ impl OntologyLoader {
     pub fn load_builtin_machine() -> HashMap<String, DomainDef> {
         let entries: OntologyConfig = serde_json::from_str(BUILTIN_MACHINE_JSON)
             .expect("Built-in machine ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in semiotic ontology.
+    pub fn load_builtin_semiotic() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_SEMIOTIC_JSON)
+            .expect("Built-in semiotic ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in category ontology.
+    pub fn load_builtin_category() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_CATEGORY_JSON)
+            .expect("Built-in category ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in agent ontology.
+    pub fn load_builtin_agent() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_AGENT_JSON)
+            .expect("Built-in agent ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in natural ontology.
+    pub fn load_builtin_natural() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_NATURAL_JSON)
+            .expect("Built-in natural ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in social ontology.
+    pub fn load_builtin_social() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_SOCIAL_JSON)
+            .expect("Built-in social ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in abstract ontology.
+    pub fn load_builtin_abstract() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_ABSTRACT_JSON)
+            .expect("Built-in abstract ontology is valid JSON");
+        Self::entries_to_map(&entries.domains)
+    }
+
+    /// Load the built-in engineering ontology.
+    pub fn load_builtin_engineering() -> HashMap<String, DomainDef> {
+        let entries: OntologyConfig = serde_json::from_str(BUILTIN_ENGINEERING_JSON)
+            .expect("Built-in engineering ontology is valid JSON");
         Self::entries_to_map(&entries.domains)
     }
 
@@ -190,6 +309,10 @@ impl OntologyLoader {
                 DomainDef {
                     name: e.name.clone(),
                     category: e.category.clone(),
+                    domain: Some(e.domain.clone()),
+                    mode: Some(e.mode.clone()),
+                    axis_kind: Some(e.axis_kind.clone()),
+                    axis_name: Some(e.axis_name.clone()),
                     unit: e.unit.clone(),
                     hints: e.hints.clone(),
                 },
@@ -221,6 +344,20 @@ impl OntologyLoader {
                 Self::load_builtin_human()
             } else if source.name == MACHINE_ONTOLOGY_NAME {
                 Self::load_builtin_machine()
+            } else if source.name == SEMIOTIC_ONTOLOGY_NAME {
+                Self::load_builtin_semiotic()
+            } else if source.name == CATEGORY_ONTOLOGY_NAME {
+                Self::load_builtin_category()
+            } else if source.name == AGENT_ONTOLOGY_NAME {
+                Self::load_builtin_agent()
+            } else if source.name == NATURAL_ONTOLOGY_NAME {
+                Self::load_builtin_natural()
+            } else if source.name == SOCIAL_ONTOLOGY_NAME {
+                Self::load_builtin_social()
+            } else if source.name == ABSTRACT_ONTOLOGY_NAME {
+                Self::load_builtin_abstract()
+            } else if source.name == ENGINEERING_ONTOLOGY_NAME {
+                Self::load_builtin_engineering()
             } else {
                 HashMap::new()
             };
@@ -229,6 +366,13 @@ impl OntologyLoader {
                 match source.kind.as_str() {
                     "human" => { loader.human_domains.insert(name, def); }
                     "machine" => { loader.machine_domains.insert(name, def); }
+                    "semiotic" => { loader.semiotic_domains.insert(name, def); }
+                    "category" => { loader.category_domains.insert(name, def); }
+                    "agent" => { loader.agent_domains.insert(name, def); }
+                    "natural" => { loader.natural_domains.insert(name, def); }
+                    "social" => { loader.social_domains.insert(name, def); }
+                    "abstract" => { loader.abstract_domains.insert(name, def); }
+                    "engineering" => { loader.engineering_domains.insert(name, def); }
                     _ => { loader.custom_domains.insert(name, def); }
                 }
             }

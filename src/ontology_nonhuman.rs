@@ -62,6 +62,10 @@ mod tests {
             DomainDef {
                 name: "testing".into(),
                 category: Some("qa".into()),
+                domain: Some("STUDY".into()),
+                mode: Some("WALK".into()),
+                axis_kind: Some("machine".into()),
+                axis_name: Some("operational".into()),
                 unit: "tests".into(),
                 hints: vec!["assert".into(), "verify".into()],
             },

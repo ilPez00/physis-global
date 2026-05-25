@@ -215,8 +215,252 @@ impl OntologicalMap {
 pub struct DomainDef {
     pub name: String,
     pub category: Option<String>,
+    pub domain: Option<String>,
+    pub mode: Option<String>,
+    pub axis_kind: Option<String>,
+    pub axis_name: Option<String>,
     pub unit: String,
     pub hints: Vec<String>,
+}
+
+// ── Semiotic Types ──────────────────────────────────────────────────
+
+/// The 6 human domains of the semiotic square.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum HumanDomain {
+    Heal,
+    Construct,
+    Fabricate,
+    Bond,
+    Study,
+}
+
+impl HumanDomain {
+    pub fn all() -> [HumanDomain; 5] {
+        [HumanDomain::Heal, HumanDomain::Construct, HumanDomain::Fabricate, HumanDomain::Bond, HumanDomain::Study]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HumanDomain::Heal => "HEAL",
+            HumanDomain::Construct => "CONSTRUCT",
+            HumanDomain::Fabricate => "FABRICATE",
+            HumanDomain::Bond => "BOND",
+            HumanDomain::Study => "STUDY",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<HumanDomain> {
+        match s.to_uppercase().as_str() {
+            "HEAL" => Some(HumanDomain::Heal),
+            "CONSTRUCT" => Some(HumanDomain::Construct),
+            "FABRICATE" => Some(HumanDomain::Fabricate),
+            "BOND" => Some(HumanDomain::Bond),
+            "STUDY" => Some(HumanDomain::Study),
+            _ => None,
+        }
+    }
+
+    /// Peircean Firstness/Quality for each domain
+    pub fn icon_type(&self) -> &'static str {
+        match self {
+            HumanDomain::Heal => "wholeness",
+            HumanDomain::Construct => "structure",
+            HumanDomain::Fabricate => "craft",
+            HumanDomain::Bond => "connection",
+            HumanDomain::Study => "truth",
+        }
+    }
+}
+
+/// The 6 human modes of operation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum HumanMode {
+    Lift,
+    Rest,
+    Walk,
+    Work,
+    Create,
+    Learn,
+}
+
+impl HumanMode {
+    pub fn all() -> [HumanMode; 6] {
+        [HumanMode::Lift, HumanMode::Rest, HumanMode::Walk, HumanMode::Work, HumanMode::Create, HumanMode::Learn]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HumanMode::Lift => "LIFT",
+            HumanMode::Rest => "REST",
+            HumanMode::Walk => "WALK",
+            HumanMode::Work => "WORK",
+            HumanMode::Create => "CREATE",
+            HumanMode::Learn => "LEARN",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<HumanMode> {
+        match s.to_uppercase().as_str() {
+            "LIFT" => Some(HumanMode::Lift),
+            "REST" => Some(HumanMode::Rest),
+            "WALK" => Some(HumanMode::Walk),
+            "WORK" => Some(HumanMode::Work),
+            "CREATE" => Some(HumanMode::Create),
+            "LEARN" => Some(HumanMode::Learn),
+            _ => None,
+        }
+    }
+}
+
+/// A grid position mapping an ontology entry to one of the 36 cells.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridPosition {
+    pub domain: HumanDomain,
+    pub mode: HumanMode,
+    pub axis_kind: String,
+    pub axis_name: String,
+}
+
+impl GridPosition {
+    pub fn from_ontology_entry(e: &OntologyEntry) -> Option<GridPosition> {
+        let domain = HumanDomain::from_str(&e.domain)?;
+        let mode = HumanMode::from_str(&e.mode)?;
+        Some(GridPosition {
+            domain,
+            mode,
+            axis_kind: e.axis_kind.clone(),
+            axis_name: e.axis_name.clone(),
+        })
+    }
+
+    pub fn cell_index(&self) -> usize {
+        let d = HumanDomain::all().iter().position(|x| *x == self.domain).unwrap_or(0);
+        let m = HumanMode::all().iter().position(|x| *x == self.mode).unwrap_or(0);
+        d * 6 + m
+    }
+}
+
+/// Peircean sign classification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeirceanSign {
+    pub representamen: String,
+    pub object: String,
+    pub interpretant: String,
+    pub trichotomy: String,
+}
+
+/// A cell in the 6×6 semiotic grid with all its metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemioticCell {
+    pub domain: HumanDomain,
+    pub mode: HumanMode,
+    pub entries: Vec<String>,
+    pub activation: f32,
+    pub peircean: Option<PeirceanSign>,
+    pub greimas: Option<String>,
+}
+
+/// The semiotic grid — a 5×6 matrix of domain×mode cells.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemioticGrid {
+    pub cells: Vec<SemioticCell>,
+}
+
+impl SemioticGrid {
+    pub fn new() -> Self {
+        let mut cells = Vec::with_capacity(30);
+        for d in HumanDomain::all() {
+            for m in HumanMode::all() {
+                cells.push(SemioticCell {
+                    domain: d,
+                    mode: m,
+                    entries: Vec::new(),
+                    activation: 0.0,
+                    peircean: None,
+                    greimas: None,
+                });
+            }
+        }
+        SemioticGrid { cells }
+    }
+
+    pub fn get_cell(&self, domain: HumanDomain, mode: HumanMode) -> Option<&SemioticCell> {
+        let _idx = domain.as_str().len() * mode.as_str().len();
+        self.cells.iter().find(|c| c.domain == domain && c.mode == mode)
+    }
+
+    pub fn get_cell_mut(&mut self, domain: HumanDomain, mode: HumanMode) -> Option<&mut SemioticCell> {
+        self.cells.iter_mut().find(|c| c.domain == domain && c.mode == mode)
+    }
+
+    pub fn classify(&mut self, entry_name: &str, domain: HumanDomain, mode: HumanMode) {
+        if let Some(cell) = self.get_cell_mut(domain, mode) {
+            cell.entries.push(entry_name.to_string());
+            cell.activation += 0.1;
+        }
+    }
+
+    /// Activate grid cells from a vector embedding using cosine similarity to domain centroids
+    pub fn activate_from_embedding(&mut self, _embedding: &[f32]) {
+        // Future: use stored centroid embeddings per cell for soft classification
+    }
+
+    pub fn compose(&self, d1: HumanDomain, _m1: HumanMode, d2: HumanDomain, m2: HumanMode) -> Option<GridPosition> {
+        // Composition: mode of second follows domain of first applied to mode of second
+        let domain = d1;
+        let mode = m2;
+        Some(GridPosition {
+            domain,
+            mode,
+            axis_kind: "composite".into(),
+            axis_name: format!("{}/{}", d1.as_str(), d2.as_str()),
+        })
+    }
+
+    /// Dual (opposite) cell on the Greimas square
+    pub fn dual(&self, domain: HumanDomain, mode: HumanMode) -> Option<(HumanDomain, HumanMode)> {
+        let d = match domain {
+            HumanDomain::Heal => HumanDomain::Fabricate,
+            HumanDomain::Construct => HumanDomain::Study,
+            HumanDomain::Fabricate => HumanDomain::Heal,
+            HumanDomain::Bond => HumanDomain::Study,
+            HumanDomain::Study => HumanDomain::Bond,
+        };
+        let m = match mode {
+            HumanMode::Lift => HumanMode::Rest,
+            HumanMode::Rest => HumanMode::Lift,
+            HumanMode::Walk => HumanMode::Work,
+            HumanMode::Work => HumanMode::Walk,
+            HumanMode::Create => HumanMode::Learn,
+            HumanMode::Learn => HumanMode::Create,
+        };
+        Some((d, m))
+    }
+
+    /// Activation heatmap as a 5×6 matrix
+    pub fn heatmap_matrix(&self) -> Vec<Vec<f32>> {
+        let mut matrix = vec![vec![0.0_f32; 6]; 5];
+        for cell in &self.cells {
+            let di = HumanDomain::all().iter().position(|d| *d == cell.domain).unwrap_or(0);
+            let mi = HumanMode::all().iter().position(|m| *m == cell.mode).unwrap_or(0);
+            matrix[di][mi] = cell.activation;
+        }
+        matrix
+    }
+
+    /// Clear all activations
+    pub fn reset_activations(&mut self) {
+        for cell in &mut self.cells {
+            cell.activation = 0.0;
+        }
+    }
+}
+
+impl Default for SemioticGrid {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Helper: cosine similarity (used throughout) ───────────────────────

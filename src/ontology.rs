@@ -7,10 +7,22 @@ pub fn parse_ontology_entry(entry: &OntologyEntry) -> DomainDef {
     DomainDef {
         name: entry.name.clone(),
         category: entry.category.clone(),
+        domain: Some(entry.domain.clone()),
+        mode: Some(entry.mode.clone()),
+        axis_kind: Some(entry.axis_kind.clone()),
+        axis_name: Some(entry.axis_name.clone()),
         unit: entry.unit.clone(),
         hints: entry.hints.clone(),
     }
 }
+
+pub const SEMIOTIC_ONTOLOGY_NAME: &str = "semiotic_ontology";
+pub const CATEGORY_ONTOLOGY_NAME: &str = "category_ontology";
+pub const AGENT_ONTOLOGY_NAME: &str = "agent_ontology";
+pub const NATURAL_ONTOLOGY_NAME: &str = "natural_ontology";
+pub const SOCIAL_ONTOLOGY_NAME: &str = "social_ontology";
+pub const ABSTRACT_ONTOLOGY_NAME: &str = "abstract_ontology";
+pub const ENGINEERING_ONTOLOGY_NAME: &str = "engineering_ontology";
 
 #[cfg(test)]
 mod tests {

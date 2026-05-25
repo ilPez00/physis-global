@@ -17,8 +17,12 @@ use physis::dream::DreamEngine;
 use physis::embed::{RandomProjectionEmbedder, VectorEmbed};
 use physis::linguistic::{LinguisticLense, LinguisticRouter};
 use physis::mapper::OntologyMapper;
-use physis::models::{Goal, Score};
+use physis::models::{Goal, Score, HumanDomain, HumanMode, SemioticGrid};
 use physis::CoherenceSnapshot;
+
+use physis::graph::{IngestRing};
+use physis::ai::onnx_worker::OnnxHolon;
+use physis::rachmaninov::RachmaninovHolon;
 
 struct AppState {
     config: PhysisConfig,
@@ -29,6 +33,10 @@ struct AppState {
     ontology: OntologyLoader,
     goals: Vec<Goal>,
     embedder: Box<dyn VectorEmbed>,
+    // Holarchy
+    onnx: Arc<OnnxHolon>,
+    rachmaninov: Arc<Mutex<RachmaninovHolon>>,
+    ingest: Arc<IngestRing>,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -387,6 +395,234 @@ async fn reconstruct_handler(
     Json(rec)
 }
 
+// ── Holarchy Handlers ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct HolarchyIngestRequest {
+    data: String,
+}
+
+async fn holarchy_ingest_handler(
+    State(state): State<SharedState>,
+    Json(req): Json<HolarchyIngestRequest>,
+) -> Json<serde_json::Value> {
+    let s = state.lock().unwrap();
+    s.ingest.push(3, req.data.as_bytes().to_vec()); // Default: ThoughtCapture
+    Json(serde_json::json!({ "status": "pushed_to_ring" }))
+}
+
+async fn holarchy_snapshot_handler(
+    State(state): State<SharedState>,
+) -> Json<serde_json::Value> {
+    let s = state.lock().unwrap();
+    let nodes_count = s.core.holarchy.nodes.len();
+    let edges_count = s.core.holarchy.edges.len();
+    Json(serde_json::json!({
+        "nodes": nodes_count,
+        "edges": edges_count,
+    }))
+}
+
+async fn holarchy_trajectory_handler(
+    State(state): State<SharedState>,
+) -> Json<physis::gantt::Trajectory> {
+    let s = state.lock().unwrap();
+    let trajectory = physis::gantt::GanttHolon::compute_trajectory(&s.core.holarchy);
+    Json(trajectory)
+}
+
+#[derive(Serialize)]
+struct GraphResponse {
+    nodes: Vec<(physis::graph::RawNodeKey, physis::graph::NodePayload)>,
+    edges: Vec<physis::graph::Edge>,
+}
+
+async fn holarchy_graph_handler(
+    State(state): State<SharedState>,
+) -> Json<GraphResponse> {
+    let s = state.lock().unwrap();
+    let nodes = s.core.holarchy.nodes.iter()
+        .map(|(k, p)| (physis::graph::RawNodeKey::from(k), *p))
+        .collect();
+    let edges = s.core.holarchy.edges.clone();
+    Json(GraphResponse { nodes, edges })
+}
+
+// ── Semiotic / Ontology Handlers ──────────────────────────────────
+
+#[derive(Serialize)]
+struct OntologyListing {
+    kind: String,
+    count: usize,
+}
+
+async fn ontology_list_handler(
+    State(state): State<SharedState>,
+) -> Json<Vec<OntologyListing>> {
+    let s = state.lock().unwrap();
+    Json(vec![
+        OntologyListing { kind: "human".into(), count: s.ontology.human_domains.len() },
+        OntologyListing { kind: "machine".into(), count: s.ontology.machine_domains.len() },
+        OntologyListing { kind: "semiotic".into(), count: s.ontology.semiotic_domains.len() },
+        OntologyListing { kind: "category".into(), count: s.ontology.category_domains.len() },
+        OntologyListing { kind: "agent".into(), count: s.ontology.agent_domains.len() },
+        OntologyListing { kind: "natural".into(), count: s.ontology.natural_domains.len() },
+        OntologyListing { kind: "social".into(), count: s.ontology.social_domains.len() },
+        OntologyListing { kind: "abstract".into(), count: s.ontology.abstract_domains.len() },
+        OntologyListing { kind: "engineering".into(), count: s.ontology.engineering_domains.len() },
+    ])
+}
+
+#[derive(Serialize)]
+struct SemioticGridResponse {
+    cells: Vec<serde_json::Value>,
+}
+
+async fn semiotic_grid_handler(
+    State(state): State<SharedState>,
+) -> Json<SemioticGridResponse> {
+    let s = state.lock().unwrap();
+    let mut grid = SemioticGrid::new();
+    // Classify all ontology entries into the grid
+    for def in s.ontology.human_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.semiotic_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.category_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.agent_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.natural_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.social_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.abstract_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    for def in s.ontology.engineering_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    let cells: Vec<serde_json::Value> = grid.cells.iter().map(|c| serde_json::json!({
+        "domain": c.domain.as_str(),
+        "mode": c.mode.as_str(),
+        "entries": c.entries,
+        "activation": c.activation,
+    })).collect();
+    Json(SemioticGridResponse { cells })
+}
+
+#[derive(Serialize)]
+struct SemioticTriangleResponse {
+    mermaid: String,
+}
+
+async fn semiotic_triangle_handler() -> Json<SemioticTriangleResponse> {
+    let mermaid = physis::output::format_semiotic_triangle(
+        "Peircean",
+        "Sign\n(Quality/Feeling)",
+        "Object\n(Fact/Reality)",
+        "Interpretant\n(Thought/Meaning)",
+    );
+    Json(SemioticTriangleResponse { mermaid })
+}
+
+#[derive(Serialize)]
+struct GreimasSquareResponse {
+    mermaid: String,
+}
+
+async fn greimas_square_handler() -> Json<GreimasSquareResponse> {
+    let mermaid = physis::output::format_greimas_square(
+        "Physis", "HEAL", "FABRICATE", "CONSTRUCT", "STUDY",
+    );
+    Json(GreimasSquareResponse { mermaid })
+}
+
+#[derive(Deserialize)]
+struct CategoryDiagramRequest {
+    objects: Vec<CategoryObject>,
+    morphisms: Vec<CategoryMorphism>,
+}
+
+#[derive(Deserialize)]
+struct CategoryObject {
+    id: String,
+    label: String,
+}
+
+#[derive(Deserialize)]
+struct CategoryMorphism {
+    from: String,
+    to: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct CategoryDiagramResponse {
+    mermaid: String,
+}
+
+async fn category_diagram_handler(
+    Json(req): Json<CategoryDiagramRequest>,
+) -> Json<CategoryDiagramResponse> {
+    let objects: Vec<(&str, &str)> = req.objects.iter().map(|o| (o.id.as_str(), o.label.as_str())).collect();
+    let morphisms: Vec<(&str, &str, &str)> = req.morphisms.iter().map(|m| (m.from.as_str(), m.to.as_str(), m.label.as_str())).collect();
+    let mermaid = physis::output::format_category_diagram(&objects, &morphisms);
+    Json(CategoryDiagramResponse { mermaid })
+}
+
+#[derive(Serialize)]
+struct HeatmapResponse {
+    table: String,
+    matrix: Vec<Vec<f32>>,
+}
+
+async fn heatmap_handler(
+    State(state): State<SharedState>,
+) -> Json<HeatmapResponse> {
+    let s = state.lock().unwrap();
+    let mut grid = SemioticGrid::new();
+    for def in s.ontology.human_domains.values() {
+        if let (Some(d), Some(m)) = (def.domain.as_ref().and_then(|d| HumanDomain::from_str(d)),
+                                       def.mode.as_ref().and_then(|m| HumanMode::from_str(m))) {
+            grid.classify(&def.name, d, m);
+        }
+    }
+    let table = physis::output::format_heatmap_table(&grid);
+    let matrix = grid.heatmap_matrix();
+    Json(HeatmapResponse { table, matrix })
+}
+
 // ── Main ──────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -400,6 +636,13 @@ async fn main() {
     let actor = PDCActor::new(config.pdca_stagnant_threshold, config.pdca_stagnant_window);
     let dreams = DreamEngine::new();
     let core = PhysisCore::new();
+    
+    // Initialize Holarchy
+    let onnx = Arc::new(OnnxHolon::spawn());
+    let (graph_tx, graph_rx) = crossbeam_channel::unbounded();
+    let ingest = Arc::new(IngestRing::spawn(onnx.get_tx(), graph_tx));
+    let rachmaninov = Arc::new(Mutex::new(RachmaninovHolon::new()));
+
     let embedder: Box<dyn VectorEmbed> = {
         #[cfg(feature = "embed-onnx")]
         if config.onnx.enabled {
@@ -420,7 +663,42 @@ async fn main() {
         ontology,
         goals: Vec::new(),
         embedder,
+        onnx: onnx.clone(),
+        rachmaninov: rachmaninov.clone(),
+        ingest: ingest.clone(),
     }));
+
+    let state_clone = state.clone();
+    // 1. Holarchy Graph Updater
+    std::thread::spawn(move || {
+        while let Ok((payload, embedding)) = graph_rx.recv() {
+            let mut s = state_clone.lock().unwrap();
+            s.core.holarchy.add_node(payload, embedding);
+        }
+    });
+
+    let onnx_clone = onnx.clone();
+    let rachmaninov_clone = rachmaninov.clone();
+    let state_clone_2 = state.clone();
+    // 2. PDCA/Rachmaninov Tick Cycle
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let mut s = state_clone_2.lock().unwrap();
+            let mut rach = rachmaninov_clone.lock().unwrap();
+            s.core.tick_holarchy(&onnx_clone, &mut rach);
+        }
+    });
+
+    let ingest_sensory = ingest.clone();
+    // 3. Sensory Server
+    tokio::spawn(async move {
+        let socket_path = "/tmp/physis_sensory.sock";
+        if let Err(e) = physis::sensory::listener::start_sensory_server(socket_path, ingest_sensory).await {
+            log::error!("Sensory server error: {}", e);
+        }
+    });
 
     let app = Router::new()
         .route("/health", get(health))
@@ -439,6 +717,17 @@ async fn main() {
         .route("/api/v1/pdca/stats", get(pdca_stats_handler))
         .route("/api/v1/reconstruct", post(reconstruct_handler))
         .route("/api/v1/translate", post(translate_handler))
+        .route("/api/v1/holarchy/ingest", post(holarchy_ingest_handler))
+        .route("/api/v1/holarchy/snapshot", get(holarchy_snapshot_handler))
+        .route("/api/v1/holarchy/trajectory", get(holarchy_trajectory_handler))
+        .route("/api/v1/holarchy/graph", get(holarchy_graph_handler))
+        // Semiotic / Ontology endpoints
+        .route("/api/v1/ontology/list", get(ontology_list_handler))
+        .route("/api/v1/semiotic/grid", get(semiotic_grid_handler))
+        .route("/api/v1/semiotic/triangle", get(semiotic_triangle_handler))
+        .route("/api/v1/semiotic/square", get(greimas_square_handler))
+        .route("/api/v1/semiotic/heatmap", get(heatmap_handler))
+        .route("/api/v1/category/diagram", post(category_diagram_handler))
         .with_state(state);
 
     let port = std::env::var("PHYSIS_PORT").unwrap_or_else(|_| "19876".to_string());

@@ -1,7 +1,8 @@
-//! Output formatters — Wiki-style reports, JSON graph, Mermaid mindmap/flowchart, domain reports.
+//! Output formatters — Wiki-style reports, JSON graph, Mermaid mindmap/flowchart, domain reports,
+//! semiotic triangle/category/heatmap/square renderers.
 use std::collections::HashMap;
 
-use crate::models::{DomainDef, Goal};
+use crate::models::{DomainDef, Goal, HumanDomain, HumanMode, SemioticGrid};
 use crate::trie::DynamicVectorTrie;
 
 /// Formats goals and trie structure into a Wiki-style markdown report.
@@ -127,6 +128,137 @@ pub fn format_domain_report(
         out.push('\n');
     }
 
+    out
+}
+
+// ── Semiotic Renderers ─────────────────────────────────────────────
+
+/// Renders a Peircean semiotic triangle as a Mermaid flowchart.
+pub fn format_semiotic_triangle(name: &str, representamen: &str, object: &str, interpretant: &str) -> String {
+    format!(
+        r#"flowchart TD
+    subgraph "{} Semiotic Triangle"
+        R["{}<br/>Representamen"]
+        O["{}<br/>Object"]
+        I["{}<br/>Interpretant"]
+        R -->|"stands for"| O
+        R -->|"grounds"| I
+        O -->|"determines"| I
+        I -->|"represents"| R
+    end
+"#,
+        name, representamen, object, interpretant
+    )
+}
+
+/// Renders a Greimas semiotic square (S / ~S / S' / ~S') as a Mermaid flowchart.
+pub fn format_greimas_square(
+    title: &str,
+    s: &str,
+    not_s: &str,
+    s_prime: &str,
+    not_s_prime: &str,
+) -> String {
+    format!(
+        r#"flowchart LR
+    subgraph "{} — Greimas Square"
+        S["{}<br/>(S)"] --- N_S["{}<br/>(~S)"]
+        SP["{}<br/>(S′)"] --- N_SP["{}<br/>(~S′)"]
+        S ===|"contrariety"| N_S
+        SP ===|"contrariety"| N_SP
+        S -->|"implication"| SP
+        N_S -->|"implication"| N_SP
+        S -.->|"negation"| N_SP
+        N_S -.->|"negation"| SP
+    end
+"#,
+        title, s, not_s, s_prime, not_s_prime
+    )
+}
+
+/// Renders a category-theory diagram (objects + morphisms) as a Mermaid flowchart.
+pub fn format_category_diagram(objects: &[(&str, &str)], morphisms: &[(&str, &str, &str)]) -> String {
+    let mut out = String::from("flowchart LR\n");
+    for (id, label) in objects {
+        out.push_str(&format!("    {}[\"{}\"]\n", id, label));
+    }
+    for (from, to, label) in morphisms {
+        out.push_str(&format!("    {} -->|\"{}\"| {}\n", from, label, to));
+    }
+    out
+}
+
+/// Renders the semiotic grid activation heatmap as text table.
+pub fn format_heatmap_table(grid: &SemioticGrid) -> String {
+    let mut out = String::new();
+    out.push_str("## Semiotic Grid Activation\n\n");
+    out.push_str("```\n");
+    out.push_str(&format!("{:<14}", ""));
+    for m in HumanMode::all() {
+        out.push_str(&format!("{:<8}", m.as_str()));
+    }
+    out.push('\n');
+    for d in HumanDomain::all() {
+        out.push_str(&format!("{:<14}", d.as_str()));
+        for m in HumanMode::all() {
+            if let Some(cell) = grid.get_cell(d, m) {
+                let bar_len = (cell.activation * 20.0) as usize;
+                let bar = "█".repeat(bar_len.min(20));
+                out.push_str(&format!("{:<8}", bar));
+            } else {
+                out.push_str(&format!("{:<8}", ""));
+            }
+        }
+        out.push('\n');
+    }
+    out.push_str("```\n");
+    out
+}
+
+/// Serialize the entire semiotic grid as JSON.
+pub fn format_semiotic_grid_json(grid: &SemioticGrid) -> String {
+    serde_json::to_string_pretty(grid).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Renders the 36-cell grid as Mermaid mindmap.
+pub fn format_semiotic_mindmap(grid: &SemioticGrid) -> String {
+    let mut out = String::new();
+    out.push_str("mindmap\n  root((Semiotic Grid))\n");
+    for d in HumanDomain::all() {
+        out.push_str(&format!("    {}_cell\n", d.as_str()));
+        for m in HumanMode::all() {
+            if let Some(cell) = grid.get_cell(d, m) {
+                let activation_bar = "█".repeat(((cell.activation * 10.0) as usize).min(10));
+                out.push_str(&format!("      {} {} {}\n", m.as_str(), cell.entries.len(), activation_bar));
+            }
+        }
+    }
+    out
+}
+
+/// Renders domain counts per cell as structured data.
+pub fn format_domain_matrix(domains: &HashMap<String, DomainDef>) -> String {
+    let mut out = String::new();
+    out.push_str("## Domain Distribution Matrix\n\n");
+    let mut counts: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    for def in domains.values() {
+        let d = def.domain.as_deref().unwrap_or("unknown").to_string();
+        let m = def.mode.as_deref().unwrap_or("unknown").to_string();
+        *counts.entry(d).or_default().entry(m).or_default() += 1;
+    }
+    out.push_str(&format!("{:<14}", ""));
+    for m in HumanMode::all() {
+        out.push_str(&format!("{:<8}", m.as_str()));
+    }
+    out.push('\n');
+    for d in HumanDomain::all() {
+        out.push_str(&format!("{:<14}", d.as_str()));
+        for m in HumanMode::all() {
+            let count = counts.get(d.as_str()).and_then(|c| c.get(m.as_str())).copied().unwrap_or(0);
+            out.push_str(&format!("{:<8}", count));
+        }
+        out.push('\n');
+    }
     out
 }
 

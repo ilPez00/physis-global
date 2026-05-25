@@ -57,6 +57,8 @@ pub mod graph;
 pub mod mapper;
 pub mod rachmaninov;
 pub mod storage;
+pub mod gantt;
+pub mod sensory;
 pub mod models;
 pub mod ontology;
 pub mod ontology_nonhuman;
@@ -86,7 +88,7 @@ pub use embed::VectorEmbed;
 pub use mapper::OntologyMapper;
 /// Core data models: Goal, Dream, Entity, Score, etc.
 pub use models::*;
-/// Output formatters: wiki, JSON graph, Mermaid mindmap.
+/// Output formatters: wiki, JSON graph, Mermaid mindmap, semiotic renderers.
 pub use output::*;
 /// Product quantizer for compressed vector storage.
 pub use quantize::ProductQuantizer;
